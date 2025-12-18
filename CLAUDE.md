@@ -22,18 +22,24 @@ cp .env.example .env
 ```
 
 ### Running the Bot
+
+**Interactive Mode (Recommended):**
 ```bash
-# Run main arbitrage bot (default: PIPPINUSDT, $100 USD)
+# Start interactive interface (default mode)
 python cex_dex_bot.py
 
-# Custom symbol and USD amount
-python cex_dex_bot.py --symbol PIPPINUSDT --usd-amount 100.0
+# Use commands like:
+# help, start, stop, balance, orders, set symbol BTCUSDT, etc.
+```
 
-# Test Binance orders (safe - places and cancels orders)
+**Command-Line Mode:**
+```bash
+# Direct trading
+python cex_dex_bot.py --mode trade --symbol PIPPINUSDT --usd-amount 100.0
+
+# Test commands
 python cex_dex_bot.py --mode test-binance --symbol PIPPINUSDT --usd-amount 10.0
-
-# Test Jupiter swap (safe - quote only, no execution)
-python cex_dex_bot.py --mode test-jupiter --usd-amount 10.0
+python cex_dex_bot.py --mode test-jupiter
 ```
 
 ### Management Commands

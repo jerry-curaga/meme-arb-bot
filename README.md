@@ -4,11 +4,12 @@ A Python bot that executes profitable arbitrage between Binance perpetual future
 
 ## ✨ Latest Features
 
-- **USD Amount Consistency** - Both Binance and Jupiter use the same USD amounts
-- **Management Commands** - Stop, balance checking, order management, emergency liquidation
-- **Comprehensive Logging** - Separate timestamped logs for orders and trades
-- **Real-time Monitoring** - Account balances, open orders, and position tracking
-- **Safety Controls** - Emergency stop and position liquidation commands
+- **🎮 Interactive Command Interface** - Type commands directly instead of command-line arguments
+- **💰 USD Amount Consistency** - Both Binance and Jupiter use the same USD amounts
+- **🛠️ Management Commands** - Stop, balance checking, order management, emergency liquidation
+- **📊 Comprehensive Logging** - Separate timestamped logs for orders and trades
+- **📡 Real-time Monitoring** - Account balances, open orders, and position tracking
+- **🛡️ Safety Controls** - Emergency stop and position liquidation commands
 
 ## How It Works
 
@@ -134,59 +135,73 @@ BUY_OUTPUT_MINT=PippinMintAddressHere
 
 ## Usage
 
-### Run Main Arbitrage Bot
+### 🎮 Interactive Mode (Recommended)
+
+Simply run the bot to enter interactive mode:
 
 ```bash
-# Default: PIPPINUSDT, $100 USD
 python cex_dex_bot.py
-
-# Custom symbol and USD amount
-python cex_dex_bot.py --symbol BTCUSDT --usd-amount 50.0
-python cex_dex_bot.py --symbol SOLUSDT --usd-amount 200.0
 ```
 
-**Expected output:**
+**Interactive Interface:**
 ```
-INFO:__main__:Starting arbitrage bot: PIPPINUSDT $100.00 USD
-INFO:__main__:Current PIPPINUSDT price: 0.44087
-INFO:__main__:Symbol PIPPINUSDT: qty_step=1.0, price_step=1e-05
-INFO:__main__:Placing order: $100.00 USD (227.0 PIPPINUSDT) at 0.45369 (market: 0.44087)
+╔══════════════════════════════════════╗
+║        Meme Arbitrage Bot v2.0       ║
+║     Interactive Command Interface    ║
+╚══════════════════════════════════════╝
+
+Current Settings:
+  Symbol: PIPPINUSDT
+  USD Amount: $100.00
+
+Type 'help' for available commands or 'quit' to exit.
+
+[PIPPINUSDT] $ help
+
+📊 MONITORING:
+  balance          - Show account balances and positions
+  orders           - List all open orders
+  status           - Show current bot status
+
+🤖 TRADING:
+  start            - Start arbitrage bot with current settings
+  stop             - Stop running arbitrage bot
+  test-binance     - Test Binance orders (safe)
+  test-jupiter     - Test Jupiter swaps (safe)
+
+⚙️ SETTINGS:
+  set symbol <SYM> - Change trading symbol (e.g., set symbol BTCUSDT)
+  set amount <USD> - Change USD amount (e.g., set amount 50.0)
+  show             - Show current settings
+
+🛡️ RISK MANAGEMENT:
+  close-all        - Cancel all open orders
+  liquidate        - Emergency: close all positions (⚠️ CAUTION)
+
+[PIPPINUSDT] $ set symbol SOLUSDT
+✅ Symbol changed to SOLUSDT
+
+[SOLUSDT] $ set amount 25.0
+✅ USD amount changed to $25.00
+
+[SOLUSDT] $ start
+🚀 Starting arbitrage bot: SOLUSDT $25.00 USD
+✅ Bot started in background! Use 'stop' to halt trading.
 ```
 
-### Test Binance Orders
+### 📋 Command-Line Mode (Legacy)
 
-Place an order, wait 3 seconds, then cancel it:
+You can still use direct commands:
 
 ```bash
+# Start trading directly
+python cex_dex_bot.py --mode trade --symbol BTCUSDT --usd-amount 50.0
+
+# Test commands
 python cex_dex_bot.py --mode test-binance --symbol PIPPINUSDT --usd-amount 10.0
+python cex_dex_bot.py --mode balance --symbol PIPPINUSDT
 ```
 
-**Output:**
-```
-=== Testing Binance Order (PIPPINUSDT, $10.00 USD) ===
-Current PIPPINUSDT price: 0.43427
-Placing order: $10.00 USD (23.0 PIPPINUSDT) at 0.44296 (market: 0.43427)
-Order placed: 98765432 - Sell $10.00 USD (23.0 PIPPINUSDT) at 0.44296
-✓ Order placed: 98765432
-✓ Order cancelled successfully
-```
-
-### Test Jupiter Swap
-
-Get a quote for $0.10 USDT swap (doesn't execute):
-
-```bash
-python cex_dex_bot.py --mode test-jupiter
-```
-
-**Output:**
-```
-=== Testing Jupiter Swap ($0.10 USDT) ===
-Getting quote for 100000 lamports...
-✓ Quote received: order_id_here
-Quote details: {...}
-Note: Not executing actual swap to preserve funds. Test quote only.
-```
 
 ## Bot Management Commands
 
