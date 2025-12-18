@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Create separate loggers for orders and trades
 def setup_file_loggers():
-    """Setup separate file loggers for orders and trades"""
+    """Setup separate file loggers for orders, trades, and bot activity"""
     import datetime
 
     # Orders logger
@@ -50,12 +50,97 @@ def setup_file_loggers():
     trades_logger.setLevel(logging.INFO)
     trades_logger.propagate = False
 
-    return orders_logger, trades_logger
+    # Bot activity logger (main log with all actions)
+    bot_logger = logging.getLogger('bot_activity')
+    bot_handler = logging.FileHandler('bot_activity.log', mode='a')
+    bot_formatter = logging.Formatter('%(asctime)s | %(message)s')
+    bot_handler.setFormatter(bot_formatter)
+    bot_logger.addHandler(bot_handler)
+    bot_logger.setLevel(logging.INFO)
+    bot_logger.propagate = False
 
-orders_logger, trades_logger = setup_file_loggers()
+    return orders_logger, trades_logger, bot_logger
+
+orders_logger, trades_logger, bot_logger = setup_file_loggers()
 
 # Load environment variables
 load_dotenv()
+
+class StatusDisplay:
+    """Real-time status display for bot activity"""
+    def __init__(self, symbol: str, usd_amount: float):
+        self.symbol = symbol
+        self.usd_amount = usd_amount
+        self.current_price = None
+        self.current_order = None
+        self.recent_actions = []
+        self.max_actions = 10
+        self.start_time = None
+
+    def start(self):
+        """Mark bot start time"""
+        import datetime
+        self.start_time = datetime.datetime.now()
+
+    def update_price(self, price: float):
+        """Update current price"""
+        self.current_price = price
+
+    def add_action(self, action: str):
+        """Add an action to recent actions list"""
+        import datetime
+        timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+        self.recent_actions.append(f"[{timestamp}] {action}")
+        if len(self.recent_actions) > self.max_actions:
+            self.recent_actions.pop(0)
+
+    def set_order(self, order_id: int, price: float, quantity: float):
+        """Set current order info"""
+        self.current_order = {
+            'order_id': order_id,
+            'price': price,
+            'quantity': quantity
+        }
+
+    def clear_order(self):
+        """Clear current order"""
+        self.current_order = None
+
+    def display(self):
+        """Display current status (called periodically)"""
+        import datetime
+
+        # Clear previous lines and move cursor up
+        print("\n" + "=" * 80)
+        print(f"🤖 BOT RUNNING - {self.symbol} | ${self.usd_amount:.2f} USD")
+
+        if self.start_time:
+            uptime = datetime.datetime.now() - self.start_time
+            print(f"⏱️  Uptime: {str(uptime).split('.')[0]}")
+
+        # Current price
+        if self.current_price:
+            print(f"💰 Current Price: ${self.current_price:.6f}")
+        else:
+            print(f"💰 Current Price: Loading...")
+
+        # Current order
+        if self.current_order:
+            print(f"📋 Active Order: ID={self.current_order['order_id']} | "
+                  f"Price=${self.current_order['price']:.6f} | "
+                  f"Qty={self.current_order['quantity']:.4f}")
+        else:
+            print(f"📋 Active Order: None")
+
+        # Recent actions
+        print(f"\n📊 Recent Actions (last {min(len(self.recent_actions), self.max_actions)}):")
+        if self.recent_actions:
+            for action in self.recent_actions[-self.max_actions:]:
+                print(f"   {action}")
+        else:
+            print("   (No actions yet)")
+
+        print("=" * 80)
 
 class TradingBotConfig:
     def __init__(self):
@@ -79,13 +164,14 @@ class TradingBotConfig:
             raise ValueError(f"Missing environment variables: {missing}")
 
 class BinanceManager:
-    def __init__(self, api_key: str, api_secret: str):
+    def __init__(self, api_key: str, api_secret: str, status_display: Optional['StatusDisplay'] = None):
         self.client = Client(api_key=api_key, api_secret=api_secret)
         self.current_price = None
         self.current_order_id = None
         self.last_order_price = None
         self.market_price_at_order = None
         self.symbol_precision = {}
+        self.status_display = status_display
     
     def _get_symbol_precision(self, symbol: str) -> dict:
         """Get quantity and price precision for a symbol"""
@@ -152,6 +238,14 @@ class BinanceManager:
             price = float(ticker['markPrice'])
             self.current_price = price
             logger.info(f"Current {symbol} price: {price}")
+
+            # Log to bot activity
+            bot_logger.info(f"PRICE_UPDATE | Symbol: {symbol} | Price: ${price:.8f}")
+
+            # Update status display
+            if self.status_display:
+                self.status_display.update_price(price)
+
             return price
         except BinanceAPIException as e:
             logger.error(f"Error fetching price: {e}")
@@ -182,7 +276,16 @@ class BinanceManager:
             # Log order details to separate file
             orders_logger.info(f"ORDER_PLACED | Symbol: {symbol} | OrderID: {order['orderId']} | Side: SELL | USD_Amount: ${usd_amount:.2f} | Quantity: {formatted_qty} | Price: {formatted_price} | Market_Price: {market_price}")
 
+            # Log to bot activity
+            bot_logger.info(f"ORDER_CREATED | Symbol: {symbol} | OrderID: {order['orderId']} | Side: SELL | USD: ${usd_amount:.2f} | Qty: {formatted_qty} | Price: ${formatted_price:.8f} | Market: ${market_price:.8f}")
+
             logger.info(f"Order placed: {order['orderId']} - Sell ${usd_amount:.2f} USD ({formatted_qty} {symbol}) at {formatted_price}")
+
+            # Update status display
+            if self.status_display:
+                self.status_display.set_order(order['orderId'], formatted_price, formatted_qty)
+                self.status_display.add_action(f"✅ ORDER PLACED: ID={order['orderId']} | ${formatted_price:.6f} | Qty={formatted_qty:.4f}")
+
             return order
         except BinanceAPIException as e:
             logger.error(f"Error placing order: {e}")
@@ -195,6 +298,15 @@ class BinanceManager:
             self.client.futures_cancel_order(symbol=symbol, orderId=order_id)
             logger.info(f"Order {order_id} cancelled")
             self.current_order_id = None
+
+            # Log to bot activity
+            bot_logger.info(f"ORDER_CANCELLED | Symbol: {symbol} | OrderID: {order_id}")
+
+            # Update status display
+            if self.status_display:
+                self.status_display.clear_order()
+                self.status_display.add_action(f"🗑️  ORDER CANCELLED: ID={order_id}")
+
             return True
         except BinanceAPIException as e:
             logger.error(f"Error cancelling order: {e}")
@@ -206,6 +318,19 @@ class BinanceManager:
             order = self.client.futures_get_order(symbol=symbol, orderId=order_id)
             if order['status'] == 'FILLED':
                 logger.info(f"Order {order_id} FILLED!")
+
+                fill_price = float(order.get('avgPrice', 0))
+                fill_qty = float(order.get('executedQty', 0))
+                fill_usd = fill_price * fill_qty
+
+                # Log to bot activity
+                bot_logger.info(f"ORDER_FILLED | Symbol: {symbol} | OrderID: {order_id} | Fill_Price: ${fill_price:.8f} | Qty: {fill_qty} | USD_Value: ${fill_usd:.2f}")
+
+                # Update status display
+                if self.status_display:
+                    self.status_display.clear_order()
+                    self.status_display.add_action(f"💰 ORDER FILLED: ID={order_id} | ${fill_price:.6f} | Qty={fill_qty:.4f}")
+
                 return order
             return None
         except BinanceAPIException as e:
@@ -216,9 +341,18 @@ class BinanceManager:
         """Check if market price has changed by threshold percent since order was placed"""
         if self.market_price_at_order is None:
             return False
-        
+
         price_change = abs(current_price - self.market_price_at_order) / self.market_price_at_order * 100
         return price_change >= threshold
+
+    def get_open_orders(self, symbol: str) -> list:
+        """Get all open orders for a symbol"""
+        try:
+            orders = self.client.futures_get_open_orders(symbol=symbol)
+            return orders
+        except BinanceAPIException as e:
+            logger.error(f"Error getting open orders: {e}")
+            return []
 
 class JupiterSwapManager:
     def __init__(self, solana_private_key: str, jupiter_api_url: str, jupiter_api_key: str, max_slippage: float):
@@ -382,38 +516,136 @@ class JupiterSwapManager:
             return None
 
 class TradingBot:
-    def __init__(self, symbol: str, usd_amount: float, config: TradingBotConfig):
+    def __init__(self, symbol: str, usd_amount: float, config: TradingBotConfig, enable_status_display: bool = True):
         self.symbol = symbol
         self.usd_amount = usd_amount  # USD amount to trade
         self.config = config
-        
-        self.binance = BinanceManager(config.binance_api_key, config.binance_api_secret)
+
+        # Create status display
+        self.status_display = StatusDisplay(symbol, usd_amount) if enable_status_display else None
+
+        self.binance = BinanceManager(config.binance_api_key, config.binance_api_secret, self.status_display)
         self.jupiter = JupiterSwapManager(
             config.solana_private_key,
             config.jupiter_api_url,
             config.jupiter_api_key,
             config.max_slippage
         )
-        
+
         self.running = True
         self.order_filled = False
-    
+
+    async def validate_existing_orders(self) -> bool:
+        """
+        Check if there are existing open orders and validate if they're still appropriate.
+        Returns True if we should place a new order, False if existing order is still valid.
+        """
+        open_orders = self.binance.get_open_orders(self.symbol)
+
+        if not open_orders:
+            logger.info("No existing orders found")
+            bot_logger.info(f"STARTUP_CHECK | Symbol: {self.symbol} | No existing orders")
+            return True  # No orders, should place new one
+
+        # Get current market price
+        current_price = self.binance.get_current_price(self.symbol)
+        if not current_price:
+            logger.error("Failed to get current price for order validation")
+            return True  # If we can't get price, place new order anyway
+
+        # Check each open order (should typically only be one for our bot)
+        for order in open_orders:
+            order_id = order['orderId']
+            order_price = float(order['price'])
+            order_side = order['side']
+            order_qty = float(order['origQty'])
+
+            # Calculate the reference price (market price when order was placed)
+            # order_price = reference_price * (1 + markup/100)
+            # reference_price = order_price / (1 + markup/100)
+            reference_price = order_price / (1 + self.config.mark_up_percent / 100)
+
+            logger.info(f"Found existing order {order_id}: {order_side} {order_qty} @ ${order_price:.8f} (ref price: ${reference_price:.8f})")
+            bot_logger.info(f"STARTUP_CHECK | Symbol: {self.symbol} | Found order {order_id} | Order_Price: ${order_price:.8f} | Reference_Price: ${reference_price:.8f} | Current_Price: ${current_price:.8f}")
+
+            # Calculate price change from reference
+            price_change_pct = abs(current_price - reference_price) / reference_price * 100
+
+            # Decide if we should cancel and replace
+            should_cancel = False
+            cancel_reason = ""
+
+            # Case 1: Market moved significantly from reference price
+            if price_change_pct >= self.config.price_change_threshold:
+                should_cancel = True
+                cancel_reason = f"Market moved {price_change_pct:.2f}% from reference (threshold: {self.config.price_change_threshold}%)"
+
+            # Case 2: Current price is at or above our sell limit (order might fill soon at bad price)
+            elif current_price >= order_price:
+                should_cancel = True
+                cancel_reason = f"Current price ${current_price:.8f} >= order price ${order_price:.8f}"
+
+            # Case 3: Current price is very close to order price (within markup range)
+            expected_order_price = current_price * (1 + self.config.mark_up_percent / 100)
+            price_diff_pct = abs(expected_order_price - order_price) / order_price * 100
+            if price_diff_pct > 1.0:  # If expected order price differs by more than 1%
+                should_cancel = True
+                cancel_reason = f"Order price ${order_price:.8f} differs {price_diff_pct:.2f}% from expected ${expected_order_price:.8f}"
+
+            if should_cancel:
+                logger.info(f"Cancelling existing order {order_id}: {cancel_reason}")
+                bot_logger.info(f"STARTUP_CANCEL | Symbol: {self.symbol} | OrderID: {order_id} | Reason: {cancel_reason}")
+                self.binance.cancel_order(self.symbol, order_id)
+                return True  # Should place new order
+            else:
+                # Order is still valid, use it
+                logger.info(f"Existing order {order_id} is still valid, keeping it")
+                bot_logger.info(f"STARTUP_KEEP | Symbol: {self.symbol} | OrderID: {order_id} | Order still valid")
+                self.binance.current_order_id = order_id
+                self.binance.last_order_price = order_price
+                self.binance.market_price_at_order = reference_price
+
+                # Update status display
+                if self.status_display:
+                    self.status_display.set_order(order_id, order_price, order_qty)
+                    self.status_display.add_action(f"📋 Kept existing order: ID={order_id} | ${order_price:.6f}")
+
+                return False  # Don't place new order
+
+        return True  # Default: place new order
+
     async def start(self):
         """Start the trading bot"""
         logger.info(f"Starting bot for {self.symbol}, USD amount: ${self.usd_amount:.2f}")
-        
-        current_price = self.binance.get_current_price(self.symbol)
-        if not current_price:
-            logger.error("Failed to get initial price")
-            return
-        
-        quote_price = current_price * (1 + self.config.mark_up_percent / 100)
-        self.binance.place_limit_sell_order(self.symbol, self.usd_amount, quote_price, current_price)
-        
+
+        # Log bot start
+        bot_logger.info(f"BOT_START | Symbol: {self.symbol} | USD_Amount: ${self.usd_amount:.2f} | Markup: {self.config.mark_up_percent}% | Threshold: {self.config.price_change_threshold}% | Slippage: {self.config.max_slippage}%")
+
+        # Initialize status display
+        if self.status_display:
+            self.status_display.start()
+            self.status_display.add_action(f"🚀 Bot started: {self.symbol} | ${self.usd_amount:.2f} USD")
+
+        # Check and validate existing orders
+        should_place_new_order = await self.validate_existing_orders()
+
+        if should_place_new_order:
+            current_price = self.binance.get_current_price(self.symbol)
+            if not current_price:
+                logger.error("Failed to get initial price")
+                bot_logger.error(f"BOT_ERROR | Failed to get initial price for {self.symbol}")
+                return
+
+            quote_price = current_price * (1 + self.config.mark_up_percent / 100)
+            self.binance.place_limit_sell_order(self.symbol, self.usd_amount, quote_price, current_price)
+
         await asyncio.gather(
             self.monitor_prices(),
             self.monitor_order_fill()
         )
+
+        # Log bot stop
+        bot_logger.info(f"BOT_STOP | Symbol: {self.symbol}")
     
     async def monitor_prices(self):
         """Monitor price changes and update orders"""
@@ -470,11 +702,18 @@ class TradingBot:
         """Execute purchase on Jupiter DEX after being filled on Binance"""
         logger.info("Executing DEX buy to complete arbitrage...")
 
+        # Log Jupiter swap attempt
+        bot_logger.info(f"JUPITER_SWAP_ATTEMPT | Symbol: {self.symbol} | USD_Amount: ${self.usd_amount:.2f}")
+
+        if self.status_display:
+            self.status_display.add_action("🔄 Executing DEX swap on Jupiter...")
+
         input_mint = os.getenv('BUY_INPUT_MINT')
         output_mint = os.getenv('BUY_OUTPUT_MINT')
 
         if not input_mint or not output_mint:
             logger.error("Missing mint configuration for DEX swap")
+            bot_logger.error(f"JUPITER_SWAP_FAILED | Missing mint configuration")
             return
 
         amount_in_lamports = int(self.usd_amount * 1e6)  # Convert USD to USDC lamports (6 decimals)
@@ -482,6 +721,9 @@ class TradingBot:
         order = await self.jupiter.get_order(input_mint, output_mint, amount_in_lamports)
         if not order:
             logger.error("Failed to get Jupiter order")
+            bot_logger.error(f"JUPITER_SWAP_FAILED | Failed to get Jupiter order")
+            if self.status_display:
+                self.status_display.add_action("❌ Failed to get Jupiter order")
             return
 
         # Extract trade details for logging
@@ -498,9 +740,35 @@ class TradingBot:
             # Log DEX transaction separately
             trades_logger.info(f"DEX_SWAP | Symbol: {self.symbol} | Jupiter_TX: {tx_hash} | Input_Amount_USD: ${jupiter_in_amount:.2f} | Output_Amount_Tokens: {jupiter_out_amount} | Input_Mint: {input_mint} | Output_Mint: {output_mint} | Slippage_Bps: {order.get('slippageBps', 'N/A')} | Route_Plan_Steps: {len(order.get('routePlan', []))}")
 
+            # Log to bot activity
+            bot_logger.info(f"JUPITER_SWAP_SUCCESS | Symbol: {self.symbol} | TX: {tx_hash} | Input_USD: ${jupiter_in_amount:.2f} | Output_Tokens: {jupiter_out_amount}")
+
+            if self.status_display:
+                self.status_display.add_action(f"✅ DEX SWAP COMPLETE: ${jupiter_in_amount:.2f} → {jupiter_out_amount} tokens | TX: {tx_hash[:8]}...")
+
             self.running = False
         else:
             logger.error("Failed to execute DEX swap")
+            bot_logger.error(f"JUPITER_SWAP_FAILED | Failed to execute swap transaction")
+            if self.status_display:
+                self.status_display.add_action("❌ Failed to execute DEX swap")
+
+    async def display_status_loop(self):
+        """Periodically display status updates"""
+        if not self.status_display:
+            return
+
+        while self.running and not self.order_filled:
+            try:
+                self.status_display.display()
+                await asyncio.sleep(5)  # Update every 5 seconds
+            except Exception as e:
+                logger.error(f"Error in display_status_loop: {e}")
+                await asyncio.sleep(5)
+
+        # Display final status when done
+        if self.status_display:
+            self.status_display.display()
 
 async def test_binance_order(symbol: str, usd_amount: float, config: TradingBotConfig):
     """Test Binance order placement and cancellation"""
@@ -768,7 +1036,10 @@ Type 'help' for available commands or 'quit' to exit.
 
     while True:
         try:
-            command = input(f"[{current_symbol}] $ ").strip().lower()
+            # Use async input to allow bot tasks to run concurrently
+            loop = asyncio.get_event_loop()
+            command = await loop.run_in_executor(None, input, f"[{current_symbol}] $ ")
+            command = command.strip().lower()
 
             if not command:
                 continue
@@ -780,6 +1051,26 @@ Type 'help' for available commands or 'quit' to exit.
                 if running_bot:
                     print("⚠️  Bot is still running. Use 'stop' command first.")
                     continue
+
+                # Check for open orders before quitting
+                try:
+                    binance = BinanceManager(config.binance_api_key, config.binance_api_secret)
+                    open_orders = binance.get_open_orders(current_symbol)
+
+                    if open_orders:
+                        print(f"\n⚠️  You have {len(open_orders)} open order(s) for {current_symbol}:")
+                        for order in open_orders:
+                            print(f"   OrderID: {order['orderId']} | {order['side']} {order['origQty']} @ ${order['price']}")
+
+                        close_orders = await loop.run_in_executor(None, input, "\n🗑️  Close all orders before exit? (yes/no): ")
+                        if close_orders.lower() in ['yes', 'y']:
+                            await cmd_close_all(current_symbol, config)
+                            print("✅ All orders closed")
+                        else:
+                            print("ℹ️  Orders left open")
+                except Exception as e:
+                    logger.error(f"Error checking orders on exit: {e}")
+
                 print("👋 Goodbye!")
                 break
 
@@ -791,6 +1082,8 @@ Available Commands:
   balance          - Show account balances and positions
   orders           - List all open orders
   status           - Show current bot status
+  recent           - Show last 10 bot actions and current state
+  price            - Get current market price
 
 🤖 TRADING:
   start            - Start arbitrage bot with current settings
@@ -811,7 +1104,9 @@ Available Commands:
   liquidate        - Emergency: close all positions (⚠️ CAUTION)
 
 💡 EXAMPLES:
+  price            - Check current market price
   start            - Start bot with current settings
+  recent           - View last 10 bot actions
   set symbol SOLUSDT - Change to SOLUSDT
   set amount 25.0  - Trade with $25 USD
   set markup 5.0   - 5% markup for volatile tokens
@@ -826,6 +1121,29 @@ Available Commands:
                     print(f"🟢 Bot is RUNNING - {current_symbol} ${current_amount:.2f} USD")
                 else:
                     print(f"🔴 Bot is STOPPED - Settings: {current_symbol} ${current_amount:.2f} USD")
+
+            elif cmd == 'recent':
+                if running_bot and running_bot.status_display:
+                    running_bot.status_display.display()
+                else:
+                    print("ℹ️  Bot is not running. No recent actions to display.")
+
+            elif cmd == 'price':
+                try:
+                    if running_bot and running_bot.binance.current_price:
+                        # Use cached price from running bot
+                        price = running_bot.binance.current_price
+                        print(f"💰 Current {current_symbol} price: ${price:.8f}")
+                    else:
+                        # Fetch fresh price
+                        binance = BinanceManager(config.binance_api_key, config.binance_api_secret)
+                        price = binance.get_current_price(current_symbol)
+                        if price:
+                            print(f"💰 Current {current_symbol} price: ${price:.8f}")
+                        else:
+                            print(f"❌ Failed to get price for {current_symbol}")
+                except Exception as e:
+                    print(f"❌ Error getting price: {e}")
 
             elif cmd == 'show':
                 print(f"""
@@ -916,7 +1234,6 @@ Current Settings:
                     print(f"🚀 Starting arbitrage bot: {current_symbol} ${current_amount:.2f} USD")
                     running_bot = TradingBot(current_symbol, current_amount, config)
                     # Start bot in background task
-                    import asyncio
                     asyncio.create_task(running_bot.start())
                     print("✅ Bot started in background! Use 'stop' to halt trading.")
 
@@ -938,7 +1255,7 @@ Current Settings:
                 await cmd_close_all(current_symbol, config)
 
             elif cmd == 'liquidate':
-                confirm = input("⚠️  WARNING: This will close all positions! Type 'YES' to confirm: ")
+                confirm = await loop.run_in_executor(None, input, "⚠️  WARNING: This will close all positions! Type 'YES' to confirm: ")
                 if confirm == 'YES':
                     await cmd_liquidate(current_symbol, config)
                 else:
