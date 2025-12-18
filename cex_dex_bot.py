@@ -27,6 +27,33 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Create separate loggers for orders and trades
+def setup_file_loggers():
+    """Setup separate file loggers for orders and trades"""
+    import datetime
+
+    # Orders logger
+    orders_logger = logging.getLogger('orders')
+    orders_handler = logging.FileHandler('orders.log', mode='a')
+    orders_formatter = logging.Formatter('%(asctime)s | %(message)s')
+    orders_handler.setFormatter(orders_formatter)
+    orders_logger.addHandler(orders_handler)
+    orders_logger.setLevel(logging.INFO)
+    orders_logger.propagate = False
+
+    # Trades logger
+    trades_logger = logging.getLogger('trades')
+    trades_handler = logging.FileHandler('trades.log', mode='a')
+    trades_formatter = logging.Formatter('%(asctime)s | %(message)s')
+    trades_handler.setFormatter(trades_formatter)
+    trades_logger.addHandler(trades_handler)
+    trades_logger.setLevel(logging.INFO)
+    trades_logger.propagate = False
+
+    return orders_logger, trades_logger
+
+orders_logger, trades_logger = setup_file_loggers()
+
 # Load environment variables
 load_dotenv()
 
@@ -151,6 +178,10 @@ class BinanceManager:
             self.current_order_id = order['orderId']
             self.last_order_price = formatted_price
             self.market_price_at_order = market_price
+
+            # Log order details to separate file
+            orders_logger.info(f"ORDER_PLACED | Symbol: {symbol} | OrderID: {order['orderId']} | Side: SELL | USD_Amount: ${usd_amount:.2f} | Quantity: {formatted_qty} | Price: {formatted_price} | Market_Price: {market_price}")
+
             logger.info(f"Order placed: {order['orderId']} - Sell ${usd_amount:.2f} USD ({formatted_qty} {symbol}) at {formatted_price}")
             return order
         except BinanceAPIException as e:
@@ -421,35 +452,52 @@ class TradingBot:
                 )
                 
                 if filled_order:
+                    # Log CEX transaction (order fill)
+                    fill_price = float(filled_order.get('avgPrice', 0))
+                    fill_qty = float(filled_order.get('executedQty', 0))
+                    fill_usd_value = fill_price * fill_qty
+                    trades_logger.info(f"CEX_FILL | Symbol: {self.symbol} | Binance_OrderID: {filled_order['orderId']} | Fill_Price: {fill_price} | Fill_Qty: {fill_qty} | USD_Value: ${fill_usd_value:.2f} | Side: SELL")
+
                     self.order_filled = True
-                    await self.execute_dex_buy()
+                    await self.execute_dex_buy(filled_order)
                 
                 await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"Error in monitor_order_fill: {e}")
                 await asyncio.sleep(5)
     
-    async def execute_dex_buy(self):
+    async def execute_dex_buy(self, filled_order: dict):
         """Execute purchase on Jupiter DEX after being filled on Binance"""
         logger.info("Executing DEX buy to complete arbitrage...")
-        
+
         input_mint = os.getenv('BUY_INPUT_MINT')
         output_mint = os.getenv('BUY_OUTPUT_MINT')
-        
+
         if not input_mint or not output_mint:
             logger.error("Missing mint configuration for DEX swap")
             return
-        
+
         amount_in_lamports = int(self.usd_amount * 1e6)  # Convert USD to USDC lamports (6 decimals)
-        
+
         order = await self.jupiter.get_order(input_mint, output_mint, amount_in_lamports)
         if not order:
             logger.error("Failed to get Jupiter order")
             return
-        
+
+        # Extract trade details for logging
+        binance_fill_price = float(filled_order.get('avgPrice', 0))
+        binance_qty = float(filled_order.get('executedQty', 0))
+        binance_usd_value = binance_fill_price * binance_qty
+        jupiter_in_amount = float(order.get('inAmount', 0)) / 1e6  # Convert from lamports to USDC
+        jupiter_out_amount = float(order.get('outAmount', 0))
+
         tx_hash = await self.jupiter.execute_swap(order)
         if tx_hash:
             logger.info(f"DEX swap executed! Tx: {tx_hash}")
+
+            # Log DEX transaction separately
+            trades_logger.info(f"DEX_SWAP | Symbol: {self.symbol} | Jupiter_TX: {tx_hash} | Input_Amount_USD: ${jupiter_in_amount:.2f} | Output_Amount_Tokens: {jupiter_out_amount} | Input_Mint: {input_mint} | Output_Mint: {output_mint} | Slippage_Bps: {order.get('slippageBps', 'N/A')} | Route_Plan_Steps: {len(order.get('routePlan', []))}")
+
             self.running = False
         else:
             logger.error("Failed to execute DEX swap")

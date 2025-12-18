@@ -27,6 +27,8 @@ Thumbs.db
 # Logs
 *.log
 logs/
+orders.log
+trades.log
 
 # Database files
 *.db
