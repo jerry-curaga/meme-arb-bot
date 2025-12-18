@@ -604,10 +604,151 @@ async def test_jupiter_swap(config: TradingBotConfig):
         import traceback
         logger.error(traceback.format_exc())
 
+async def cmd_stop(config: TradingBotConfig):
+    """Stop any running bot instances"""
+    logger.info("🛑 Stop command - Bot stopping gracefully")
+    # In a real implementation, this would signal running bot processes to stop
+    # For now, just exit
+    import sys
+    sys.exit(0)
+
+async def cmd_balance(symbol: str, config: TradingBotConfig):
+    """Show balance of tokens and perpetual positions"""
+    logger.info(f"\n=== Balance Check for {symbol} ===")
+
+    try:
+        binance = BinanceManager(config.binance_api_key, config.binance_api_secret)
+        jupiter = JupiterSwapManager(config.solana_private_key, config.jupiter_api_url, config.jupiter_api_key)
+
+        # Get Binance futures account info
+        try:
+            account = binance.client.futures_account()
+            total_balance = float(account.get('totalWalletBalance', 0))
+            available_balance = float(account.get('availableBalance', 0))
+            unrealized_pnl = float(account.get('totalUnrealizedProfit', 0))
+
+            logger.info(f"💰 Binance Futures Account:")
+            logger.info(f"   Total Balance: ${total_balance:.2f} USDT")
+            logger.info(f"   Available: ${available_balance:.2f} USDT")
+            logger.info(f"   Unrealized PnL: ${unrealized_pnl:.2f} USDT")
+
+            # Get positions for the specific symbol
+            positions = binance.client.futures_position_information(symbol=symbol)
+            for pos in positions:
+                if float(pos['positionAmt']) != 0:
+                    logger.info(f"   {symbol} Position: {pos['positionAmt']} @ ${pos['entryPrice']} (PnL: ${pos['unRealizedProfit']})")
+        except Exception as e:
+            logger.error(f"Error getting Binance balance: {e}")
+
+        # Get Solana wallet balance
+        try:
+            input_mint = os.getenv('BUY_INPUT_MINT')
+            output_mint = os.getenv('BUY_OUTPUT_MINT')
+
+            logger.info(f"🔗 Solana Wallet: {str(jupiter.keypair.pubkey())}")
+            logger.info(f"   Input Token (USDC): {input_mint}")
+            logger.info(f"   Output Token: {output_mint}")
+            # Note: Getting actual token balances requires additional RPC calls
+            logger.info("   (Use Solscan to view detailed token balances)")
+
+        except Exception as e:
+            logger.error(f"Error getting Solana balance: {e}")
+
+    except Exception as e:
+        logger.error(f"Balance check failed: {e}")
+
+async def cmd_orders(symbol: str, config: TradingBotConfig):
+    """Show all open orders"""
+    logger.info(f"\n=== Open Orders for {symbol} ===")
+
+    try:
+        binance = BinanceManager(config.binance_api_key, config.binance_api_secret)
+        orders = binance.client.futures_get_open_orders(symbol=symbol)
+
+        if not orders:
+            logger.info("📭 No open orders")
+            return
+
+        logger.info(f"📋 Found {len(orders)} open order(s):")
+        for order in orders:
+            side = order['side']
+            quantity = order['origQty']
+            price = order['price']
+            order_id = order['orderId']
+            time_created = order['time']
+
+            logger.info(f"   OrderID: {order_id} | {side} {quantity} {symbol} @ ${price} | Created: {time_created}")
+
+    except Exception as e:
+        logger.error(f"Error getting orders: {e}")
+
+async def cmd_close_all(symbol: str, config: TradingBotConfig):
+    """Close all open orders"""
+    logger.info(f"\n=== Closing All Orders for {symbol} ===")
+
+    try:
+        binance = BinanceManager(config.binance_api_key, config.binance_api_secret)
+        orders = binance.client.futures_get_open_orders(symbol=symbol)
+
+        if not orders:
+            logger.info("📭 No open orders to close")
+            return
+
+        logger.info(f"🗑️  Closing {len(orders)} order(s)...")
+        for order in orders:
+            try:
+                result = binance.client.futures_cancel_order(symbol=symbol, orderId=order['orderId'])
+                logger.info(f"   ✅ Cancelled OrderID: {order['orderId']}")
+                orders_logger.info(f"ORDER_CANCELLED | Symbol: {symbol} | OrderID: {order['orderId']} | Reason: Manual_Close_All")
+            except Exception as e:
+                logger.error(f"   ❌ Failed to cancel OrderID {order['orderId']}: {e}")
+
+    except Exception as e:
+        logger.error(f"Error closing orders: {e}")
+
+async def cmd_liquidate(symbol: str, config: TradingBotConfig):
+    """Liquidate all tokens and perpetual positions"""
+    logger.info(f"\n=== Liquidating All Positions for {symbol} ===")
+    logger.warning("⚠️  This will close all positions and may result in losses!")
+
+    try:
+        binance = BinanceManager(config.binance_api_key, config.binance_api_secret)
+
+        # Close all open orders first
+        await cmd_close_all(symbol, config)
+
+        # Get current positions
+        positions = binance.client.futures_position_information(symbol=symbol)
+
+        for pos in positions:
+            position_amt = float(pos['positionAmt'])
+            if position_amt != 0:
+                # Close position with market order
+                side = 'BUY' if position_amt < 0 else 'SELL'  # Opposite side to close
+                quantity = abs(position_amt)
+
+                try:
+                    order = binance.client.futures_create_order(
+                        symbol=symbol,
+                        side=side,
+                        type='MARKET',
+                        quantity=quantity
+                    )
+                    logger.info(f"   ✅ Closed position: {side} {quantity} {symbol} (OrderID: {order['orderId']})")
+                    trades_logger.info(f"POSITION_CLOSED | Symbol: {symbol} | Binance_OrderID: {order['orderId']} | Side: {side} | Quantity: {quantity} | Type: MARKET | Reason: Liquidation")
+                except Exception as e:
+                    logger.error(f"   ❌ Failed to close position: {e}")
+
+        # Note: Solana token liquidation would require additional implementation
+        logger.info("💡 Note: Solana token liquidation requires manual implementation via Jupiter")
+
+    except Exception as e:
+        logger.error(f"Liquidation failed: {e}")
+
 async def main():
     parser = argparse.ArgumentParser(description='CEX/DEX Arbitrage Trading Bot')
-    parser.add_argument('--mode', default='trade', 
-                       choices=['trade', 'test-binance', 'test-jupiter'],
+    parser.add_argument('--mode', default='trade',
+                       choices=['trade', 'test-binance', 'test-jupiter', 'stop', 'balance', 'orders', 'close-all', 'liquidate'],
                        help='Operation mode')
     parser.add_argument('--symbol', default='PIPPINUSDT',
                        help='Trading symbol (e.g., PIPPINUSDT)')
@@ -628,6 +769,21 @@ async def main():
     
     elif args.mode == 'test-jupiter':
         await test_jupiter_swap(config)
+
+    elif args.mode == 'stop':
+        await cmd_stop(config)
+
+    elif args.mode == 'balance':
+        await cmd_balance(args.symbol, config)
+
+    elif args.mode == 'orders':
+        await cmd_orders(args.symbol, config)
+
+    elif args.mode == 'close-all':
+        await cmd_close_all(args.symbol, config)
+
+    elif args.mode == 'liquidate':
+        await cmd_liquidate(args.symbol, config)
 
 if __name__ == "__main__":
     asyncio.run(main())

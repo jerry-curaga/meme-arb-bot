@@ -23,18 +23,35 @@ cp .env.example .env
 
 ### Running the Bot
 ```bash
-# Run main arbitrage bot (default: PIPPINUSDT, qty 100)
+# Run main arbitrage bot (default: PIPPINUSDT, $100 USD)
 python cex_dex_bot.py
 
-# Custom symbol and quantity
-python cex_dex_bot.py --symbol BTCUSDT --quantity 0.001
-python cex_dex_bot.py --symbol SOLUSDT --quantity 10
+# Custom symbol and USD amount
+python cex_dex_bot.py --symbol PIPPINUSDT --usd-amount 100.0
 
 # Test Binance orders (safe - places and cancels orders)
-python cex_dex_bot.py --mode test-binance --symbol PIPPINUSDT --quantity 100
+python cex_dex_bot.py --mode test-binance --symbol PIPPINUSDT --usd-amount 10.0
 
 # Test Jupiter swap (safe - quote only, no execution)
-python cex_dex_bot.py --mode test-jupiter
+python cex_dex_bot.py --mode test-jupiter --usd-amount 10.0
+```
+
+### Management Commands
+```bash
+# Check account balances and positions
+python cex_dex_bot.py --mode balance --symbol PIPPINUSDT
+
+# View open orders
+python cex_dex_bot.py --mode orders --symbol PIPPINUSDT
+
+# Cancel all orders (safe)
+python cex_dex_bot.py --mode close-all --symbol PIPPINUSDT
+
+# Emergency liquidation (⚠️ CAUTION)
+python cex_dex_bot.py --mode liquidate --symbol PIPPINUSDT
+
+# Stop bot gracefully
+python cex_dex_bot.py --mode stop
 ```
 
 ### Testing Workflow

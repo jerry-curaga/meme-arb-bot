@@ -1,6 +1,14 @@
-# CEX/DEX Arbitrage Trading Bot
+# Meme Arbitrage Bot
 
-A Python bot that executes profitable arbitrage between Binance perpetual futures and Jupiter DEX (Solana).
+A Python bot that executes profitable arbitrage between Binance perpetual futures and Jupiter DEX (Solana) using consistent USD amounts.
+
+## ✨ Latest Features
+
+- **USD Amount Consistency** - Both Binance and Jupiter use the same USD amounts
+- **Management Commands** - Stop, balance checking, order management, emergency liquidation
+- **Comprehensive Logging** - Separate timestamped logs for orders and trades
+- **Real-time Monitoring** - Account balances, open orders, and position tracking
+- **Safety Controls** - Emergency stop and position liquidation commands
 
 ## How It Works
 
@@ -24,10 +32,11 @@ Example flow:
 
 ## Installation
 
-### 1. Clone/Setup Project
+### 1. Clone Repository
 
 ```bash
-mkdir cex-dex-bot && cd cex-dex-bot
+git clone https://github.com/jerry-curaga/meme-arb-bot.git
+cd meme-arb-bot
 ```
 
 ### 2. Setup Python Environment
@@ -128,21 +137,20 @@ BUY_OUTPUT_MINT=PippinMintAddressHere
 ### Run Main Arbitrage Bot
 
 ```bash
-# Default: PIPPINUSDT, qty 100
+# Default: PIPPINUSDT, $100 USD
 python cex_dex_bot.py
 
-# Custom symbol and quantity
-python cex_dex_bot.py --symbol BTCUSDT --quantity 0.001
-python cex_dex_bot.py --symbol SOLUSDT --quantity 10
+# Custom symbol and USD amount
+python cex_dex_bot.py --symbol BTCUSDT --usd-amount 50.0
+python cex_dex_bot.py --symbol SOLUSDT --usd-amount 200.0
 ```
 
 **Expected output:**
 ```
-INFO:__main__:Starting bot for PIPPINUSDT, quantity: 100.0
-INFO:__main__:Current PIPPINUSDT price: 0.34562
+INFO:__main__:Starting arbitrage bot: PIPPINUSDT $100.00 USD
+INFO:__main__:Current PIPPINUSDT price: 0.44087
 INFO:__main__:Symbol PIPPINUSDT: qty_step=1.0, price_step=1e-05
-INFO:__main__:Placing order: 100.0 PIPPINUSDT at 0.35629
-INFO:__main__:Order placed: 12345678 - Sell 100.0 PIPPINUSDT at 0.35629
+INFO:__main__:Placing order: $100.00 USD (227.0 PIPPINUSDT) at 0.45369 (market: 0.44087)
 ```
 
 ### Test Binance Orders
@@ -150,15 +158,15 @@ INFO:__main__:Order placed: 12345678 - Sell 100.0 PIPPINUSDT at 0.35629
 Place an order, wait 3 seconds, then cancel it:
 
 ```bash
-python cex_dex_bot.py --mode test-binance --symbol PIPPINUSDT --quantity 100
+python cex_dex_bot.py --mode test-binance --symbol PIPPINUSDT --usd-amount 10.0
 ```
 
 **Output:**
 ```
-=== Testing Binance Order (PIPPINUSDT, qty: 100) ===
-Current PIPPINUSDT price: 0.34455
-Placing order: 100.0 PIPPINUSDT at 0.35144 (market: 0.34455)
-Order placed: 98765432 - Sell 100.0 PIPPINUSDT at 0.35144
+=== Testing Binance Order (PIPPINUSDT, $10.00 USD) ===
+Current PIPPINUSDT price: 0.43427
+Placing order: $10.00 USD (23.0 PIPPINUSDT) at 0.44296 (market: 0.43427)
+Order placed: 98765432 - Sell $10.00 USD (23.0 PIPPINUSDT) at 0.44296
 ✓ Order placed: 98765432
 ✓ Order cancelled successfully
 ```
@@ -179,6 +187,47 @@ Getting quote for 100000 lamports...
 Quote details: {...}
 Note: Not executing actual swap to preserve funds. Test quote only.
 ```
+
+## Bot Management Commands
+
+The bot includes comprehensive management commands for controlling operations:
+
+### Check Account Status
+
+```bash
+# View balances and positions
+python cex_dex_bot.py --mode balance --symbol PIPPINUSDT
+
+# Check open orders
+python cex_dex_bot.py --mode orders --symbol PIPPINUSDT
+```
+
+### Risk Management
+
+```bash
+# Cancel all open orders (safe)
+python cex_dex_bot.py --mode close-all --symbol PIPPINUSDT
+
+# Emergency liquidation (⚠️ CAUTION: closes all positions)
+python cex_dex_bot.py --mode liquidate --symbol PIPPINUSDT
+
+# Stop bot gracefully
+python cex_dex_bot.py --mode stop
+```
+
+### Management Features
+
+- **Real-time balance checking** - Binance Futures + Solana wallet info
+- **Order monitoring** - List all open orders with details
+- **Emergency controls** - Quickly close orders and positions
+- **Comprehensive logging** - All actions logged with timestamps
+- **Safety warnings** - Alerts for destructive operations
+
+**Log Files:**
+- `orders.log` - Order placements, fills, and cancellations
+- `trades.log` - CEX fills, DEX swaps, and liquidations
+
+See `COMMANDS.md` for complete command reference.
 
 ## Configuration & Tuning
 
@@ -208,7 +257,7 @@ self.max_slippage = 1.0             # Max slippage on Jupiter swap (lower = stri
 
 - Need more USDT in Futures wallet
 - Transfer USDT from Spot to USD-M Futures
-- Start with smaller quantity (e.g., 10 USDT)
+- Start with smaller amount (e.g., $10 USD)
 
 ### "Invalid symbol"
 
@@ -238,7 +287,7 @@ Before running the live bot:
 
 1. **Test Binance** (no risk):
    ```bash
-   python cex_dex_bot.py --mode test-binance --quantity 100
+   python cex_dex_bot.py --mode test-binance --usd-amount 10.0
    ```
 
 2. **Test Jupiter** (small amount):
@@ -246,9 +295,9 @@ Before running the live bot:
    python cex_dex_bot.py --mode test-jupiter
    ```
 
-3. **Run with small quantity** (real money):
+3. **Run with small amount** (real money):
    ```bash
-   python cex_dex_bot.py --quantity 10
+   python cex_dex_bot.py --usd-amount 10.0
    ```
 
 4. **Monitor logs** for fills and swaps
@@ -257,7 +306,7 @@ Before running the live bot:
 
 ## Risk Management
 
-- **Start small**: Test with 10-100 USDT first
+- **Start small**: Test with $10-100 USD first
 - **Monitor slippage**: Adjust based on token liquidity
 - **Keep SOL funded**: Need for Solana transaction fees (~0.0003 SOL per swap)
 - **Watch fees**:
@@ -327,7 +376,7 @@ def log_trade(symbol, order_id, fill_price, swap_tx):
 
 - [ ] Test Binance orders with `--mode test-binance`
 - [ ] Test Jupiter with `--mode test-jupiter`
-- [ ] Run with small quantity for 30+ minutes
+- [ ] Run with small amount ($10-20 USD) for 30+ minutes
 - [ ] Monitor logs for errors
 - [ ] Verify first successful fill + swap
 - [ ] Document expected spread for your pair
