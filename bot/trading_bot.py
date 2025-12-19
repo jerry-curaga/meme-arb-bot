@@ -186,7 +186,11 @@ class TradingBot:
                     fill_price = float(filled_order.get('avgPrice', 0))
                     fill_qty = float(filled_order.get('executedQty', 0))
                     fill_usd_value = fill_price * fill_qty
-                    trades_logger.info(f"CEX_FILL | Symbol: {self.symbol} | Binance_OrderID: {filled_order['orderId']} | Fill_Price: {fill_price} | Fill_Qty: {fill_qty} | USD_Value: ${fill_usd_value:.2f} | Side: SELL")
+
+                    # Log with detailed precision to catch any calculation issues
+                    logger.info(f"Order filled: Price={fill_price:.8f}, Qty={fill_qty:.8f}, USD={fill_usd_value:.8f}")
+                    trades_logger.info(f"CEX_FILL | Symbol: {self.symbol} | Binance_OrderID: {filled_order['orderId']} | Fill_Price: {fill_price:.8f} | Fill_Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f} | Side: SELL")
+                    bot_logger.info(f"ORDER_FILLED | Symbol: {self.symbol} | OrderID: {filled_order['orderId']} | Fill_Price: ${fill_price:.8f} | Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f}")
 
                     self.order_filled = True
                     await self.execute_dex_buy(filled_order)
@@ -222,6 +226,7 @@ class TradingBot:
         # Use actual USD value from Binance fill, not config amount
         amount_in_lamports = int(binance_usd_value * 1e6)  # Convert USD to USDC lamports (6 decimals)
         logger.info(f"Jupiter swap amount: ${binance_usd_value:.2f} USD = {amount_in_lamports} lamports")
+        bot_logger.info(f"JUPITER_AMOUNT_CALC | Binance_Fill_USD: ${binance_usd_value:.8f} | Requested_Lamports: {amount_in_lamports} | Requested_USDC: {amount_in_lamports/1e6:.6f}")
 
         order = await self.jupiter.get_order(input_mint, output_mint, amount_in_lamports)
         if not order:
@@ -232,18 +237,25 @@ class TradingBot:
             return
 
         # Extract Jupiter trade details for logging
-        jupiter_in_amount = float(order.get('inAmount', 0)) / 1e6  # Convert from lamports to USDC
+        jupiter_in_amount_lamports = float(order.get('inAmount', 0))
+        jupiter_in_amount = jupiter_in_amount_lamports / 1e6  # Convert from lamports to USDC
         jupiter_out_amount = float(order.get('outAmount', 0))
+
+        # Validate Jupiter returned the amount we requested
+        amount_discrepancy_pct = abs(jupiter_in_amount_lamports - amount_in_lamports) / amount_in_lamports * 100 if amount_in_lamports > 0 else 0
+        if amount_discrepancy_pct > 5.0:  # More than 5% difference
+            logger.warning(f"⚠️  Jupiter amount mismatch! Requested: {amount_in_lamports} lamports (${amount_in_lamports/1e6:.6f}), Got: {int(jupiter_in_amount_lamports)} lamports (${jupiter_in_amount:.6f}) - {amount_discrepancy_pct:.1f}% difference")
+            bot_logger.warning(f"JUPITER_AMOUNT_MISMATCH | Requested_Lamports: {amount_in_lamports} | Received_Lamports: {int(jupiter_in_amount_lamports)} | Discrepancy_Pct: {amount_discrepancy_pct:.2f}%")
 
         tx_hash = await self.jupiter.execute_swap(order)
         if tx_hash:
             logger.info(f"DEX swap executed! Tx: {tx_hash}")
 
-            # Log DEX transaction separately
-            trades_logger.info(f"DEX_SWAP | Symbol: {self.symbol} | Jupiter_TX: {tx_hash} | Input_Amount_USD: ${jupiter_in_amount:.2f} | Output_Amount_Tokens: {jupiter_out_amount} | Input_Mint: {input_mint} | Output_Mint: {output_mint} | Slippage_Bps: {order.get('slippageBps', 'N/A')} | Route_Plan_Steps: {len(order.get('routePlan', []))}")
+            # Log DEX transaction separately with precise amounts
+            trades_logger.info(f"DEX_SWAP | Symbol: {self.symbol} | Jupiter_TX: {tx_hash} | Input_Amount_USD: ${jupiter_in_amount:.6f} | Input_Lamports: {int(jupiter_in_amount_lamports)} | Output_Amount_Tokens: {jupiter_out_amount} | Input_Mint: {input_mint} | Output_Mint: {output_mint} | Slippage_Bps: {order.get('slippageBps', 'N/A')} | Route_Plan_Steps: {len(order.get('routePlan', []))}")
 
             # Log to bot activity
-            bot_logger.info(f"JUPITER_SWAP_SUCCESS | Symbol: {self.symbol} | TX: {tx_hash} | Input_USD: ${jupiter_in_amount:.2f} | Output_Tokens: {jupiter_out_amount}")
+            bot_logger.info(f"JUPITER_SWAP_SUCCESS | Symbol: {self.symbol} | TX: {tx_hash} | Input_USD: ${jupiter_in_amount:.6f} | Input_Lamports: {int(jupiter_in_amount_lamports)} | Output_Tokens: {jupiter_out_amount}")
 
             if self.status_display:
                 self.status_display.add_action(f"✅ DEX SWAP COMPLETE: ${jupiter_in_amount:.2f} → {jupiter_out_amount} tokens | TX: {tx_hash[:8]}...")
