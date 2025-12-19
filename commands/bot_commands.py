@@ -299,7 +299,7 @@ async def interactive_mode(config: TradingBotConfig):
 ╚══════════════════════════════════════╝
 
 Current Settings:
-  Symbol: {current_symbol} | USD: ${current_amount:.2f} | Markup: {current_markup:.1f}% | Threshold: {current_threshold:.1f}% | Slippage: {current_slippage:.1f}%
+  Symbol: {current_symbol} | USD: ${current_amount:.2f} | Markup: {current_markup:.4f}% | Threshold: {current_threshold:.4f}% | Slippage: {current_slippage:.4f}%
 
 Type 'help' for available commands or 'quit' to exit.
 """)
@@ -420,9 +420,9 @@ Available Commands:
 Current Settings:
   Symbol: {current_symbol}
   USD Amount: ${current_amount:.2f} (used for both Binance perps and Jupiter DEX)
-  Markup: {current_markup:.1f}% (perp order above market price)
-  Threshold: {current_threshold:.1f}% (price change to update orders)
-  Slippage: {current_slippage:.1f}% (max slippage for Jupiter swaps)
+  Markup: {current_markup:.4f}% (perp order above market price)
+  Threshold: {current_threshold:.4f}% (price change to update orders)
+  Slippage: {current_slippage:.4f}% (max slippage for Jupiter swaps)
   Bot Status: {'🟢 RUNNING' if running_bot else '🔴 STOPPED'}
 """)
 
@@ -460,7 +460,7 @@ Current Settings:
                         else:
                             current_markup = new_markup
                             config.mark_up_percent = new_markup
-                            print(f"✅ Markup changed to {current_markup:.1f}%")
+                            print(f"✅ Markup changed to {current_markup:.4f}%")
                     except ValueError:
                         print("❌ Invalid markup. Use decimal format (e.g., 3.5)")
 
@@ -490,7 +490,7 @@ Current Settings:
                         else:
                             current_slippage = new_slippage
                             config.max_slippage = new_slippage
-                            print(f"✅ Max slippage changed to {current_slippage:.1f}%")
+                            print(f"✅ Max slippage changed to {current_slippage:.4f}%")
                     except ValueError:
                         print("❌ Invalid slippage. Use decimal format (e.g., 1.5)")
 
