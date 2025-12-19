@@ -26,7 +26,7 @@ cp .env.example .env
 **Interactive Mode (Recommended):**
 ```bash
 # Start interactive interface (default mode)
-python cex_dex_bot.py
+python bot.py
 
 # Use commands like:
 # help, start, stop, balance, orders, set symbol BTCUSDT, etc.
@@ -35,46 +35,65 @@ python cex_dex_bot.py
 **Command-Line Mode:**
 ```bash
 # Direct trading
-python cex_dex_bot.py --mode trade --symbol PIPPINUSDT --usd-amount 100.0
+python bot.py --mode trade --symbol PIPPINUSDT --usd-amount 100.0
 
 # Test commands
-python cex_dex_bot.py --mode test-binance --symbol PIPPINUSDT --usd-amount 10.0
-python cex_dex_bot.py --mode test-jupiter
+python bot.py --mode test-binance --symbol PIPPINUSDT --usd-amount 10.0
+python bot.py --mode test-jupiter
 ```
 
 ### Management Commands
 ```bash
 # Check account balances and positions
-python cex_dex_bot.py --mode balance --symbol PIPPINUSDT
+python bot.py --mode balance --symbol PIPPINUSDT
 
 # View open orders
-python cex_dex_bot.py --mode orders --symbol PIPPINUSDT
+python bot.py --mode orders --symbol PIPPINUSDT
 
 # Cancel all orders (safe)
-python cex_dex_bot.py --mode close-all --symbol PIPPINUSDT
+python bot.py --mode close-all --symbol PIPPINUSDT
 
 # Emergency liquidation (⚠️ CAUTION)
-python cex_dex_bot.py --mode liquidate --symbol PIPPINUSDT
+python bot.py --mode liquidate --symbol PIPPINUSDT
 
 # Stop bot gracefully
-python cex_dex_bot.py --mode stop
+python bot.py --mode stop
 ```
 
 ### Testing Workflow
-1. Test Binance connectivity: `python cex_dex_bot.py --mode test-binance`
-2. Test Jupiter quotes: `python cex_dex_bot.py --mode test-jupiter`
-3. Run with small quantity: `python cex_dex_bot.py --quantity 10`
+1. Test Binance connectivity: `python bot.py --mode test-binance`
+2. Test Jupiter quotes: `python bot.py --mode test-jupiter`
+3. Run with small quantity: `python bot.py --quantity 10`
 
 ## Architecture
 
+### Project Structure
+
+The codebase is organized into modular components:
+
+```
+meme-arb-bot/
+├── bot.py                         # Main entry point (77 lines)
+├── config.py                      # TradingBotConfig class
+├── managers/
+│   ├── binance_manager.py         # Binance Futures API manager
+│   └── jupiter_manager.py         # Jupiter DEX swap manager
+├── bot/
+│   ├── trading_bot.py             # Main trading bot orchestrator
+│   └── status_display.py          # Real-time status display
+├── commands/
+│   └── bot_commands.py            # All commands & interactive mode
+└── utils/
+    └── logging_setup.py           # Logging configuration
+```
+
 ### Core Components
 
-The bot consists of 4 main classes in `cex_dex_bot.py`:
-
-1. **TradingBotConfig** - Configuration management and environment variable validation
-2. **BinanceManager** - Handles Binance Futures API operations (orders, pricing, precision)
-3. **JupiterSwapManager** - Manages Jupiter DEX swaps on Solana (quotes, transaction building)
-4. **TradingBot** - Main orchestrator that coordinates CEX/DEX arbitrage logic
+1. **TradingBotConfig** (`config.py`) - Configuration management and environment variable validation
+2. **BinanceManager** (`managers/binance_manager.py`) - Handles Binance Futures API operations (orders, pricing, precision)
+3. **JupiterSwapManager** (`managers/jupiter_manager.py`) - Manages Jupiter DEX swaps on Solana (quotes, transaction building)
+4. **TradingBot** (`bot/trading_bot.py`) - Main orchestrator that coordinates CEX/DEX arbitrage logic
+5. **StatusDisplay** (`bot/status_display.py`) - Real-time status monitoring (use `recent` command)
 
 ### Trading Flow
 
@@ -86,7 +105,7 @@ The bot consists of 4 main classes in `cex_dex_bot.py`:
 
 ### Key Configuration
 
-Edit in `TradingBotConfig` class:
+Edit in `config.py` TradingBotConfig class:
 - `mark_up_percent` (default: 3.0) - Markup above market price
 - `price_change_threshold` (default: 0.5) - % change to trigger order update
 - `max_slippage` (default: 1.0) - Max slippage for Jupiter swaps
