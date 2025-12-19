@@ -20,9 +20,9 @@ from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 from solders.presigner import Presigner
 
-# Setup logging
+# Setup logging - only show warnings/errors in console, log everything to files
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,  # Only show warnings and errors in console
     format='%(levelname)s:%(name)s:%(message)s'
 )
 logger = logging.getLogger(__name__)
