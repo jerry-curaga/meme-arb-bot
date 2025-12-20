@@ -1,5 +1,6 @@
 # requirements.txt
 python-binance==1.0.20
+pymexc==2.2.3
 python-dotenv==1.0.0
 websockets==12.0
 aiohttp==3.9.1

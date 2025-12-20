@@ -47,10 +47,20 @@ def get_market_config(symbol: str, markets_file='markets.json'):
 
 class TradingBotConfig:
     def __init__(self):
+        # CEX provider selection
+        self.cex_provider = os.getenv('CEX_PROVIDER', 'binance').lower()
+
+        # Binance credentials
         self.binance_api_key = os.getenv('BINANCE_API_KEY')
         self.binance_api_secret = os.getenv('BINANCE_API_SECRET')
+
+        # MEXC credentials
+        self.mexc_api_key = os.getenv('MEXC_API_KEY')
+        self.mexc_api_secret = os.getenv('MEXC_API_SECRET')
+
+        # Solana and Jupiter
         self.solana_private_key = os.getenv('SOLANA_PRIVATE_KEY')
-        self.jupiter_api_url = os.getenv('JUPITER_API_URL', 'https://api.jup.ag/ultra')
+        self.jupiter_api_url = os.getenv('JUPITER_API_URL', 'https://api.jup.ag/ultra/v1')
         self.jupiter_api_key = os.getenv('JUPITER_API_KEY')
 
         # Trading parameters
@@ -61,7 +71,18 @@ class TradingBotConfig:
         self._validate()
 
     def _validate(self):
-        required = ['BINANCE_API_KEY', 'BINANCE_API_SECRET', 'SOLANA_PRIVATE_KEY', 'JUPITER_API_KEY']
+        """Validate required environment variables based on CEX provider"""
+        # Always required
+        required = ['SOLANA_PRIVATE_KEY', 'JUPITER_API_KEY']
+
+        # CEX-specific requirements
+        if self.cex_provider == 'binance':
+            required.extend(['BINANCE_API_KEY', 'BINANCE_API_SECRET'])
+        elif self.cex_provider == 'mexc':
+            required.extend(['MEXC_API_KEY', 'MEXC_API_SECRET'])
+        else:
+            raise ValueError(f"Invalid CEX_PROVIDER: {self.cex_provider}. Must be 'binance' or 'mexc'")
+
         missing = [var for var in required if not os.getenv(var)]
         if missing:
             raise ValueError(f"Missing environment variables: {missing}")

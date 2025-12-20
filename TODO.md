@@ -1,13 +1,14 @@
 # TODO
 
 P0
-- fix retries; binance order gets filled but no logs, and no jupiter txn
-- move market configs to a separate config file from .env
+- support MEXC as additional perp source
+- allow bot to monitor and place orders on both perps
+- support multiple markups, to incrase order flow
 
 P1
-- measure latency, do we need a server?
-- how to support multiple sources for perps?
+- improve dex latency
 
+ 
 P2
 - how to get onchain balance?
 - how to liquidate onchain?

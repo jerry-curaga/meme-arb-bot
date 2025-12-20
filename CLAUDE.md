@@ -4,7 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a CEX/DEX arbitrage trading bot that executes profitable arbitrage between Binance perpetual futures and Jupiter DEX (Solana). The bot quotes on Binance at markup above market price and automatically executes corresponding buys on Jupiter when filled.
+This is a CEX/DEX arbitrage trading bot that executes profitable arbitrage between perpetual futures (Binance or MEXC) and Jupiter DEX (Solana). The bot quotes on the CEX at markup above market price and automatically executes corresponding buys on Jupiter when filled.
+
+**Supported CEX Providers:**
+- Binance Futures (default)
+- MEXC Futures
+
+Configure your preferred CEX provider via the `CEX_PROVIDER` environment variable.
 
 ## Development Commands
 

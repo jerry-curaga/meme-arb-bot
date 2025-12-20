@@ -6,6 +6,7 @@ import asyncio
 import logging
 from config import TradingBotConfig, get_market_config
 from managers.binance_manager import BinanceManager
+from managers.mexc_manager import MEXCManager
 from managers.jupiter_manager import JupiterSwapManager
 from bot.status_display import StatusDisplay
 from utils.logging_setup import bot_logger, trades_logger
@@ -22,7 +23,17 @@ class TradingBot:
         # Create status display
         self.status_display = StatusDisplay(symbol, usd_amount) if enable_status_display else None
 
-        self.binance = BinanceManager(config.binance_api_key, config.binance_api_secret, self.status_display)
+        # Initialize CEX manager based on provider
+        if config.cex_provider == 'binance':
+            logger.info(f"Using Binance as CEX provider")
+            self.cex = BinanceManager(config.binance_api_key, config.binance_api_secret, self.status_display)
+        elif config.cex_provider == 'mexc':
+            logger.info(f"Using MEXC as CEX provider")
+            self.cex = MEXCManager(config.mexc_api_key, config.mexc_api_secret, self.status_display)
+        else:
+            raise ValueError(f"Unsupported CEX provider: {config.cex_provider}")
+
+        # Initialize Jupiter manager
         self.jupiter = JupiterSwapManager(
             config.solana_private_key,
             config.jupiter_api_url,
@@ -38,7 +49,7 @@ class TradingBot:
         Check if there are existing open orders and validate if they're still appropriate.
         Returns True if we should place a new order, False if existing order is still valid.
         """
-        open_orders = self.binance.get_open_orders(self.symbol)
+        open_orders = self.cex.get_open_orders(self.symbol)
 
         if not open_orders:
             logger.info("No existing orders found")
@@ -46,7 +57,7 @@ class TradingBot:
             return True  # No orders, should place new one
 
         # Get current market price
-        current_price = self.binance.get_current_price(self.symbol)
+        current_price = self.cex.get_current_price(self.symbol)
         if not current_price:
             logger.error("Failed to get current price for order validation")
             return True  # If we can't get price, place new order anyway
@@ -93,15 +104,15 @@ class TradingBot:
             if should_cancel:
                 logger.info(f"Cancelling existing order {order_id}: {cancel_reason}")
                 bot_logger.info(f"STARTUP_CANCEL | Symbol: {self.symbol} | OrderID: {order_id} | Reason: {cancel_reason}")
-                self.binance.cancel_order(self.symbol, order_id)
+                self.cex.cancel_order(self.symbol, order_id)
                 return True  # Should place new order
             else:
                 # Order is still valid, use it
                 logger.info(f"Existing order {order_id} is still valid, keeping it")
                 bot_logger.info(f"STARTUP_KEEP | Symbol: {self.symbol} | OrderID: {order_id} | Order still valid")
-                self.binance.current_order_id = order_id
-                self.binance.last_order_price = order_price
-                self.binance.market_price_at_order = reference_price
+                self.cex.current_order_id = order_id
+                self.cex.last_order_price = order_price
+                self.cex.market_price_at_order = reference_price
 
                 # Update status display
                 if self.status_display:
@@ -128,14 +139,14 @@ class TradingBot:
         should_place_new_order = await self.validate_existing_orders()
 
         if should_place_new_order:
-            current_price = self.binance.get_current_price(self.symbol)
+            current_price = self.cex.get_current_price(self.symbol)
             if not current_price:
                 logger.error("Failed to get initial price")
                 bot_logger.error(f"BOT_ERROR | Failed to get initial price for {self.symbol}")
                 return
 
             quote_price = current_price * (1 + self.config.mark_up_percent / 100)
-            self.binance.place_limit_sell_order(self.symbol, self.usd_amount, quote_price, current_price)
+            self.cex.place_limit_sell_order(self.symbol, self.usd_amount, quote_price, current_price)
 
         await asyncio.gather(
             self.monitor_prices(),
@@ -149,19 +160,19 @@ class TradingBot:
         """Monitor price changes and update orders"""
         while self.running and not self.order_filled:
             try:
-                current_price = self.binance.get_current_price(self.symbol)
+                current_price = self.cex.get_current_price(self.symbol)
                 
-                if current_price and self.binance.should_update_order(
+                if current_price and self.cex.should_update_order(
                     current_price, 
                     self.config.price_change_threshold
                 ):
-                    logger.info(f"Market moved {self.config.price_change_threshold}% from {self.binance.market_price_at_order}, updating order")
+                    logger.info(f"Market moved {self.config.price_change_threshold}% from {self.cex.market_price_at_order}, updating order")
                     
-                    if self.binance.current_order_id:
-                        self.binance.cancel_order(self.symbol, self.binance.current_order_id)
+                    if self.cex.current_order_id:
+                        self.cex.cancel_order(self.symbol, self.cex.current_order_id)
                     
                     new_quote_price = current_price * (1 + self.config.mark_up_percent / 100)
-                    self.binance.place_limit_sell_order(self.symbol, self.usd_amount, new_quote_price, current_price)
+                    self.cex.place_limit_sell_order(self.symbol, self.usd_amount, new_quote_price, current_price)
                 
                 await asyncio.sleep(2)
             except Exception as e:
@@ -172,7 +183,7 @@ class TradingBot:
         """Monitor order fills via WebSocket for instant notifications"""
         try:
             logger.info("Using WebSocket for real-time order fill monitoring")
-            await self.binance.start_user_stream(self._handle_order_fill)
+            await self.cex.start_user_stream(self._handle_order_fill)
         except Exception as e:
             logger.error(f"WebSocket monitoring failed: {e}")
             logger.warning("Falling back to polling mode...")
@@ -227,13 +238,13 @@ class TradingBot:
         logger.info("Using polling mode for order fill monitoring (1s interval)")
         while self.running and not self.order_filled:
             try:
-                if not self.binance.current_order_id:
+                if not self.cex.current_order_id:
                     await asyncio.sleep(5)
                     continue
 
-                filled_order = self.binance.check_order_filled(
+                filled_order = self.cex.check_order_filled(
                     self.symbol,
-                    self.binance.current_order_id
+                    self.cex.current_order_id
                 )
 
                 if filled_order:
