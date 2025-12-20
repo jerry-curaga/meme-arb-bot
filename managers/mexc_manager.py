@@ -3,8 +3,11 @@ MEXC Futures API manager
 """
 import logging
 import asyncio
+import time
+import hmac
+import hashlib
 from typing import Optional, Callable
-from pymexc import futures
+import requests
 
 from utils.logging_setup import bot_logger
 
@@ -12,8 +15,9 @@ logger = logging.getLogger(__name__)
 
 
 class MEXCManager:
+    BASE_URL = "https://contract.mexc.com"
+
     def __init__(self, api_key: str, api_secret: str, status_display: Optional['StatusDisplay'] = None):
-        self.client = futures.HTTP(api_key=api_key, api_secret=api_secret)
         self.api_key = api_key
         self.api_secret = api_secret
         self.current_price = None
@@ -26,6 +30,57 @@ class MEXCManager:
         # WebSocket related
         self.ws_client = None
         self.ws_running = False
+
+    def _generate_signature(self, params: dict) -> str:
+        """Generate HMAC SHA256 signature for MEXC API"""
+        # Sort parameters alphabetically
+        sorted_params = sorted(params.items())
+        query_string = '&'.join([f"{k}={v}" for k, v in sorted_params])
+
+        # Create signature: accessKey + timestamp + request parameters
+        sign_str = f"{self.api_key}{params.get('timestamp', '')}{query_string}"
+        signature = hmac.new(
+            self.api_secret.encode('utf-8'),
+            sign_str.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+
+        return signature
+
+    def _request(self, method: str, endpoint: str, params: dict = None, signed: bool = False) -> dict:
+        """Make HTTP request to MEXC API"""
+        url = f"{self.BASE_URL}{endpoint}"
+        headers = {
+            'Content-Type': 'application/json',
+            'ApiKey': self.api_key
+        }
+
+        if params is None:
+            params = {}
+
+        if signed:
+            # Add timestamp for signed requests
+            params['timestamp'] = int(time.time() * 1000)
+            headers['Request-Time'] = str(params['timestamp'])
+            headers['Signature'] = self._generate_signature(params)
+
+        try:
+            if method == 'GET':
+                response = requests.get(url, params=params, headers=headers)
+            elif method == 'POST':
+                response = requests.post(url, json=params, headers=headers)
+            elif method == 'DELETE':
+                response = requests.delete(url, params=params, headers=headers)
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
+
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"MEXC API request failed: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response: {e.response.text}")
+            return None
 
     def _normalize_symbol(self, symbol: str) -> str:
         """Convert Binance-style symbol to MEXC format
@@ -49,7 +104,7 @@ class MEXCManager:
 
         try:
             # Get contract details
-            detail = self.client.detail(mexc_symbol)
+            detail = self._request('GET', '/api/v1/contract/detail', {'symbol': mexc_symbol})
 
             if detail and 'data' in detail:
                 data = detail['data']
@@ -107,7 +162,7 @@ class MEXCManager:
         mexc_symbol = self._normalize_symbol(symbol)
 
         try:
-            ticker = self.client.ticker(mexc_symbol)
+            ticker = self._request('GET', '/api/v1/contract/ticker', {'symbol': mexc_symbol})
 
             if ticker and 'data' in ticker:
                 price = float(ticker['data']['lastPrice'])
@@ -149,15 +204,17 @@ class MEXCManager:
             # type: 1 = limit order
             # open_type: 1 = isolated, 2 = cross
             # leverage: can be set (default 10)
-            order = self.client.order(
-                symbol=mexc_symbol,
-                price=formatted_price,
-                vol=formatted_qty,
-                side=3,  # 3 = open short (sell)
-                type=1,  # 1 = limit order
-                open_type=1,  # isolated margin
-                leverage=10  # default leverage
-            )
+            params = {
+                'symbol': mexc_symbol,
+                'price': formatted_price,
+                'vol': formatted_qty,
+                'side': 3,  # 3 = open short (sell)
+                'type': 1,  # 1 = limit order
+                'openType': 1,  # isolated margin
+                'leverage': 10  # default leverage
+            }
+
+            order = self._request('POST', '/api/v1/private/order/submit', params, signed=True)
 
             if order and 'data' in order:
                 order_id = order['data']
@@ -192,7 +249,8 @@ class MEXCManager:
         mexc_symbol = self._normalize_symbol(symbol)
 
         try:
-            result = self.client.cancel_order([order_id])
+            params = {'orderIds': [order_id]}
+            result = self._request('POST', '/api/v1/private/order/cancel', params, signed=True)
             logger.info(f"Order {order_id} cancellation result: {result}")
             self.current_order_id = None
 
@@ -263,7 +321,7 @@ class MEXCManager:
         mexc_symbol = self._normalize_symbol(symbol)
 
         try:
-            result = self.client.open_orders(mexc_symbol)
+            result = self._request('GET', f'/api/v1/private/order/list/open_orders/{mexc_symbol}', signed=True)
 
             if result and 'data' in result:
                 return result['data']
@@ -274,7 +332,7 @@ class MEXCManager:
             return []
 
     async def start_user_stream(self, on_order_update: Callable):
-        """Start WebSocket user data stream for real-time order updates
+        """Start order monitoring (uses polling instead of WebSocket due to pymexc issues)
 
         Args:
             on_order_update: Async callback function to handle order updates
@@ -283,54 +341,45 @@ class MEXCManager:
         try:
             self.ws_running = True
 
-            async def handle_message(message):
-                """Handle WebSocket messages"""
+            logger.info("📊 Starting MEXC order monitoring (polling mode)...")
+            bot_logger.info("POLLING_START | Using polling for order updates (MEXC WebSocket unavailable)")
+
+            last_check_order_id = self.current_order_id
+
+            # Poll for order updates every second
+            while self.ws_running:
                 try:
-                    # MEXC order update structure
-                    if isinstance(message, dict) and message.get('channel') == 'push.personal.order':
-                        order_data = message.get('data', {})
-                        order_id = order_data.get('orderId')
-                        order_status = order_data.get('state')  # MEXC order states
-                        symbol = order_data.get('symbol')
+                    if self.current_order_id and str(self.current_order_id) == str(last_check_order_id):
+                        # Get order details
+                        open_orders = self.get_open_orders(self.current_order_id)
 
-                        logger.debug(f"WebSocket: Order {order_id} status: {order_status}")
+                        # If order is not in open orders, it's been filled
+                        order_still_open = any(str(o.get('orderId')) == str(self.current_order_id) for o in open_orders)
 
-                        # Check if order is filled (state == 2 in MEXC)
-                        if order_status == 2 and str(order_id) == str(self.current_order_id):
-                            logger.info(f"🔔 WebSocket: Order {order_id} FILLED!")
-                            bot_logger.info(f"WEBSOCKET_ORDER_FILL | OrderID: {order_id} | Symbol: {symbol}")
+                        if not order_still_open:
+                            logger.info(f"📊 Polling: Order {self.current_order_id} FILLED!")
+                            bot_logger.info(f"POLLING_ORDER_FILL | OrderID: {self.current_order_id}")
 
                             # Build filled order structure
                             filled_order = {
-                                'orderId': order_id,
-                                'symbol': symbol,
+                                'orderId': self.current_order_id,
                                 'status': 'FILLED',
-                                'avgPrice': float(order_data.get('dealAvgPrice', 0)),
-                                'executedQty': float(order_data.get('dealVol', 0)),
+                                'avgPrice': self.last_order_price,  # Best guess
+                                'executedQty': 0,  # Unknown without history query
                             }
 
                             # Call the callback
                             await on_order_update(filled_order)
+                            break
+
                 except Exception as e:
-                    logger.error(f"Error handling WebSocket message: {e}")
+                    logger.error(f"Error checking order status: {e}")
 
-            logger.info("🔌 Starting MEXC WebSocket user data stream...")
-            bot_logger.info("WEBSOCKET_START | Starting user data stream for real-time order updates")
-
-            # Create WebSocket client with personal callback
-            self.ws_client = futures.WebSocket(
-                api_key=self.api_key,
-                api_secret=self.api_secret,
-                personal_callback=handle_message
-            )
-
-            # Keep WebSocket alive
-            while self.ws_running:
                 await asyncio.sleep(1)
 
         except Exception as e:
-            logger.error(f"WebSocket error: {e}")
-            bot_logger.error(f"WEBSOCKET_ERROR | {e}")
+            logger.error(f"Polling error: {e}")
+            bot_logger.error(f"POLLING_ERROR | {e}")
             import traceback
             logger.error(traceback.format_exc())
         finally:
