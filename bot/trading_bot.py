@@ -139,7 +139,7 @@ class TradingBot:
 
         await asyncio.gather(
             self.monitor_prices(),
-            self.monitor_order_fill()
+            self.monitor_order_fill_websocket()
         )
 
         # Log bot stop
@@ -168,8 +168,72 @@ class TradingBot:
                 logger.error(f"Error in monitor_prices: {e}")
                 await asyncio.sleep(5)
     
+    async def monitor_order_fill_websocket(self):
+        """Monitor order fills via WebSocket for instant notifications"""
+        try:
+            logger.info("Using WebSocket for real-time order fill monitoring")
+            await self.binance.start_user_stream(self._handle_order_fill)
+        except Exception as e:
+            logger.error(f"WebSocket monitoring failed: {e}")
+            logger.warning("Falling back to polling mode...")
+            await self.monitor_order_fill()
+
+    async def _handle_order_fill(self, filled_order: dict):
+        """Handle order fill event from WebSocket
+
+        Args:
+            filled_order: Order data from Binance API
+        """
+        try:
+            # Log CEX transaction (order fill)
+            fill_price = float(filled_order.get('avgPrice', 0))
+            fill_qty = float(filled_order.get('executedQty', 0))
+            fill_usd_value = fill_price * fill_qty
+
+            # Log with detailed precision to catch any calculation issues
+            logger.info(f"Order filled: Price={fill_price:.8f}, Qty={fill_qty:.8f}, USD={fill_usd_value:.8f}")
+            trades_logger.info(f"CEX_FILL | Symbol: {self.symbol} | Binance_OrderID: {filled_order['orderId']} | Fill_Price: {fill_price:.8f} | Fill_Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f} | Side: SELL")
+            bot_logger.info(f"ORDER_FILLED | Symbol: {self.symbol} | OrderID: {filled_order['orderId']} | Fill_Price: ${fill_price:.8f} | Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f}")
+
+            # IMPORTANT: Only set order_filled to True AFTER successful Jupiter swap
+            # This ensures we retry if Jupiter swap fails
+            success = await self.execute_dex_buy(filled_order)
+            if success:
+                self.order_filled = True
+                logger.info("✅ Arbitrage completed successfully!")
+                # Stop the bot
+                self.running = False
+            else:
+                logger.error("⚠️  Jupiter swap failed, will retry...")
+                # WebSocket stays open, but we don't get another fill event
+                # So we need to keep retrying manually
+                retry_count = 0
+                while not self.order_filled and retry_count < 10:
+                    await asyncio.sleep(5)
+                    logger.info(f"Retrying Jupiter swap (attempt {retry_count + 2})...")
+                    success = await self.execute_dex_buy(filled_order)
+                    if success:
+                        self.order_filled = True
+                        logger.info("✅ Arbitrage completed successfully!")
+                        self.running = False
+                        break
+                    retry_count += 1
+
+                if not self.order_filled:
+                    logger.error("❌ Failed to complete arbitrage after 10 retries")
+
+        except Exception as e:
+            logger.error(f"Error handling order fill: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
     async def monitor_order_fill(self):
-        """Monitor if our limit order gets filled"""
+        """Monitor if our limit order gets filled (POLLING FALLBACK)
+
+        This is the fallback method using REST API polling.
+        WebSocket monitoring is preferred for instant notifications.
+        """
+        logger.info("Using polling mode for order fill monitoring (1s interval)")
         while self.running and not self.order_filled:
             try:
                 if not self.binance.current_order_id:
@@ -182,25 +246,7 @@ class TradingBot:
                 )
 
                 if filled_order:
-                    # Log CEX transaction (order fill)
-                    fill_price = float(filled_order.get('avgPrice', 0))
-                    fill_qty = float(filled_order.get('executedQty', 0))
-                    fill_usd_value = fill_price * fill_qty
-
-                    # Log with detailed precision to catch any calculation issues
-                    logger.info(f"Order filled: Price={fill_price:.8f}, Qty={fill_qty:.8f}, USD={fill_usd_value:.8f}")
-                    trades_logger.info(f"CEX_FILL | Symbol: {self.symbol} | Binance_OrderID: {filled_order['orderId']} | Fill_Price: {fill_price:.8f} | Fill_Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f} | Side: SELL")
-                    bot_logger.info(f"ORDER_FILLED | Symbol: {self.symbol} | OrderID: {filled_order['orderId']} | Fill_Price: ${fill_price:.8f} | Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f}")
-
-                    # IMPORTANT: Only set order_filled to True AFTER successful Jupiter swap
-                    # This ensures we retry if Jupiter swap fails
-                    success = await self.execute_dex_buy(filled_order)
-                    if success:
-                        self.order_filled = True
-                        logger.info("✅ Arbitrage completed successfully!")
-                    else:
-                        logger.error("⚠️  Jupiter swap failed, will retry...")
-                        await asyncio.sleep(5)  # Wait before retry
+                    await self._handle_order_fill(filled_order)
 
                 await asyncio.sleep(1)
             except Exception as e:

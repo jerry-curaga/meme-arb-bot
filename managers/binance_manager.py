@@ -2,9 +2,11 @@
 Binance Futures API manager
 """
 import logging
-from typing import Optional
+import asyncio
+from typing import Optional, Callable
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
+from binance import AsyncClient, BinanceSocketManager
 
 from utils.logging_setup import bot_logger
 
@@ -14,12 +16,19 @@ logger = logging.getLogger(__name__)
 class BinanceManager:
     def __init__(self, api_key: str, api_secret: str, status_display: Optional['StatusDisplay'] = None):
         self.client = Client(api_key=api_key, api_secret=api_secret)
+        self.api_key = api_key
+        self.api_secret = api_secret
         self.current_price = None
         self.current_order_id = None
         self.last_order_price = None
         self.market_price_at_order = None
         self.symbol_precision = {}
         self.status_display = status_display
+
+        # WebSocket related
+        self.async_client = None
+        self.bsm = None
+        self.user_socket = None
 
     def _get_symbol_precision(self, symbol: str) -> dict:
         """Get quantity and price precision for a symbol"""
@@ -201,3 +210,70 @@ class BinanceManager:
         except BinanceAPIException as e:
             logger.error(f"Error getting open orders: {e}")
             return []
+
+    async def start_user_stream(self, on_order_update: Callable):
+        """Start WebSocket user data stream for real-time order updates
+
+        Args:
+            on_order_update: Async callback function to handle order updates
+                            Called with (order_data: dict) when order status changes
+        """
+        try:
+            # Create async client
+            self.async_client = await AsyncClient.create(self.api_key, self.api_secret)
+            self.bsm = BinanceSocketManager(self.async_client)
+
+            # Start futures user data stream
+            self.user_socket = self.bsm.futures_user_socket()
+
+            logger.info("🔌 Starting Binance WebSocket user data stream...")
+            bot_logger.info("WEBSOCKET_START | Starting user data stream for real-time order updates")
+
+            async with self.user_socket as stream:
+                while True:
+                    msg = await stream.recv()
+
+                    # Handle different event types
+                    if msg['e'] == 'ORDER_TRADE_UPDATE':
+                        order_update = msg['o']
+                        order_id = order_update['i']
+                        order_status = order_update['X']
+                        symbol = order_update['s']
+
+                        logger.debug(f"WebSocket: Order {order_id} status: {order_status}")
+
+                        # Only trigger callback for FILLED orders
+                        if order_status == 'FILLED' and order_id == self.current_order_id:
+                            logger.info(f"🔔 WebSocket: Order {order_id} FILLED!")
+                            bot_logger.info(f"WEBSOCKET_ORDER_FILL | OrderID: {order_id} | Symbol: {symbol}")
+
+                            # Get full order details from REST API (WebSocket doesn't have all fields)
+                            filled_order = self.client.futures_get_order(symbol=symbol, orderId=order_id)
+
+                            # Call the callback
+                            await on_order_update(filled_order)
+
+        except Exception as e:
+            logger.error(f"WebSocket error: {e}")
+            bot_logger.error(f"WEBSOCKET_ERROR | {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+        finally:
+            await self.stop_user_stream()
+
+    async def stop_user_stream(self):
+        """Stop WebSocket user data stream"""
+        try:
+            if self.user_socket:
+                logger.info("🔌 Stopping WebSocket user data stream...")
+                # Socket is closed when exiting async context manager
+                self.user_socket = None
+
+            if self.async_client:
+                await self.async_client.close_connection()
+                self.async_client = None
+                self.bsm = None
+
+            bot_logger.info("WEBSOCKET_STOP | User data stream stopped")
+        except Exception as e:
+            logger.error(f"Error stopping WebSocket: {e}")
