@@ -6,5 +6,13 @@
     "output_mint": "Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump",
     "name": "PIPPIN",
     "description": "PIPPIN memecoin arbitrage (Binance)"
+  },
+  "NOBODYUSDT": {
+    "cex_provider": "mexc",
+    "symbol": "NOBODY_USDT",
+    "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "output_mint": "C29ebrgYjYoJPMGPnPSGY1q3mMGk4iDSqnQeQQA7moon",
+    "name": "NOBODY",
+    "description": "NOBODY memecoin arbitrage (Mexc)"
   }
 }
