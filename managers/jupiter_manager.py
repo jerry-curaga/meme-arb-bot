@@ -157,16 +157,25 @@ class JupiterSwapManager:
                     logger.debug(f"Response status: {resp.status}")
                     logger.debug(f"Response body: {result}")
 
-                    if resp.status == 200 and 'txid' in result:
-                        tx_hash = result['txid']
-                        logger.info(f"✓ Transaction executed: {tx_hash}")
-                        return tx_hash
-                    elif 'signature' in result:
-                        tx_hash = result['signature']
-                        logger.info(f"✓ Transaction executed: {tx_hash}")
-                        return tx_hash
+                    # Check Jupiter's status field from API response
+                    status = result.get('status', 'Unknown')
+                    tx_hash = result.get('signature') or result.get('txid')
+
+                    if status == 'Success' and tx_hash:
+                        logger.info(f"✓ Jupiter API reports: SUCCESS")
+                        logger.info(f"  Transaction signature: {tx_hash}")
+                        logger.info(f"  Slot: {result.get('slot', 'N/A')}")
+                        return {'success': True, 'signature': tx_hash, 'result': result}
+                    elif status == 'Failed':
+                        error = result.get('error', 'Unknown error')
+                        logger.error(f"✗ Jupiter API reports: FAILED")
+                        logger.error(f"  Transaction signature: {tx_hash}")
+                        logger.error(f"  Error: {error}")
+                        logger.error(f"  Code: {result.get('code', 'N/A')}")
+                        logger.error(f"  Slot: {result.get('slot', 'N/A')}")
+                        return {'success': False, 'signature': tx_hash, 'error': error, 'result': result}
                     else:
-                        logger.error(f"Unexpected response: {result}")
+                        logger.error(f"Unexpected response from Jupiter: {result}")
                         return None
         except Exception as e:
             logger.error(f"Error executing swap: {e}")

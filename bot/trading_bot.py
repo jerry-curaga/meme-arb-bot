@@ -330,14 +330,22 @@ class TradingBot:
             bot_logger.warning(f"JUPITER_AMOUNT_MISMATCH | Requested_Lamports: {amount_in_lamports} | Received_Lamports: {int(jupiter_in_amount_lamports)} | Discrepancy_Pct: {amount_discrepancy_pct:.2f}%")
 
         # Retry logic for executing Jupiter swap (up to 3 attempts with exponential backoff)
-        tx_hash = None
+        swap_result = None
         for attempt in range(1, 4):
             try:
                 logger.info(f"Attempting to execute Jupiter swap (attempt {attempt}/3)...")
-                tx_hash = await self.jupiter.execute_swap(order)
-                if tx_hash:
-                    logger.info(f"✓ Successfully executed swap on attempt {attempt}: {tx_hash}")
+                swap_result = await self.jupiter.execute_swap(order)
+                if swap_result and swap_result.get('success'):
+                    logger.info(f"✓ Successfully executed swap on attempt {attempt}")
                     break
+                elif swap_result and not swap_result.get('success'):
+                    # Jupiter reported failure
+                    error = swap_result.get('error', 'Unknown error')
+                    logger.error(f"Jupiter swap FAILED on attempt {attempt}: {error}")
+                    if attempt < 3:
+                        wait_time = 2 ** attempt
+                        logger.info(f"Waiting {wait_time}s before retry...")
+                        await asyncio.sleep(wait_time)
                 else:
                     logger.warning(f"Jupiter swap returned None on attempt {attempt}")
                     if attempt < 3:
@@ -352,14 +360,15 @@ class TradingBot:
                     wait_time = 2 ** attempt
                     await asyncio.sleep(wait_time)
 
-        if tx_hash:
+        if swap_result and swap_result.get('success'):
+            tx_hash = swap_result['signature']
             logger.info(f"DEX swap executed! Tx: {tx_hash}")
 
             # Log DEX transaction separately with precise amounts
-            trades_logger.info(f"DEX_SWAP | Symbol: {self.symbol} | Jupiter_TX: {tx_hash} | Input_Amount_USD: ${jupiter_in_amount:.6f} | Input_Lamports: {int(jupiter_in_amount_lamports)} | Output_Amount_Tokens: {jupiter_out_amount} | Input_Mint: {input_mint} | Output_Mint: {output_mint} | Slippage_Bps: {order.get('slippageBps', 'N/A')} | Route_Plan_Steps: {len(order.get('routePlan', []))}")
+            trades_logger.info(f"DEX_SWAP | Symbol: {self.symbol} | Jupiter_TX: {tx_hash} | Status: Success | Input_Amount_USD: ${jupiter_in_amount:.6f} | Input_Lamports: {int(jupiter_in_amount_lamports)} | Output_Amount_Tokens: {jupiter_out_amount} | Input_Mint: {input_mint} | Output_Mint: {output_mint} | Slippage_Bps: {order.get('slippageBps', 'N/A')} | Route_Plan_Steps: {len(order.get('routePlan', []))}")
 
             # Log to bot activity
-            bot_logger.info(f"JUPITER_SWAP_SUCCESS | Symbol: {self.symbol} | TX: {tx_hash} | Input_USD: ${jupiter_in_amount:.6f} | Input_Lamports: {int(jupiter_in_amount_lamports)} | Output_Tokens: {jupiter_out_amount}")
+            bot_logger.info(f"JUPITER_SWAP_SUCCESS | Symbol: {self.symbol} | TX: {tx_hash} | Status: Success | Input_USD: ${jupiter_in_amount:.6f} | Input_Lamports: {int(jupiter_in_amount_lamports)} | Output_Tokens: {jupiter_out_amount}")
 
             if self.status_display:
                 self.status_display.add_action(f"✅ DEX SWAP COMPLETE: ${jupiter_in_amount:.2f} → {jupiter_out_amount} tokens | TX: {tx_hash[:8]}...")
@@ -367,8 +376,22 @@ class TradingBot:
             self.running = False
             return True
         else:
-            logger.error("Failed to execute DEX swap after 3 attempts")
-            bot_logger.error(f"JUPITER_SWAP_FAILED | Failed to execute swap transaction after retries")
+            # Jupiter swap failed after retries
+            if swap_result and not swap_result.get('success'):
+                # Got a failure response from Jupiter
+                tx_hash = swap_result.get('signature', 'unknown')
+                error = swap_result.get('error', 'Unknown error')
+                logger.error(f"Jupiter swap FAILED: {error}")
+                logger.error(f"Transaction: {tx_hash}")
+                logger.error(f"View on Solscan: https://solscan.io/tx/{tx_hash}")
+
+                trades_logger.error(f"DEX_SWAP_FAILED | Symbol: {self.symbol} | Jupiter_TX: {tx_hash} | Status: Failed | Error: {error} | Solscan: https://solscan.io/tx/{tx_hash}")
+                bot_logger.error(f"JUPITER_SWAP_FAILED | Symbol: {self.symbol} | TX: {tx_hash} | Status: Failed | Error: {error}")
+            else:
+                # No response or unknown error
+                logger.error("Failed to execute DEX swap after 3 attempts")
+                bot_logger.error(f"JUPITER_SWAP_FAILED | Failed to execute swap transaction after retries")
+
             if self.status_display:
                 self.status_display.add_action("❌ Failed to execute DEX swap")
             return False
