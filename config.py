@@ -2,10 +2,47 @@
 Trading bot configuration
 """
 import os
+import json
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+
+def load_markets(markets_file='markets.json'):
+    """Load market configurations from JSON file
+
+    Returns:
+        dict: Market configurations keyed by symbol
+    """
+    try:
+        with open(markets_file, 'r') as f:
+            markets = json.load(f)
+        return markets
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Markets configuration file not found: {markets_file}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in markets file: {e}")
+
+
+def get_market_config(symbol: str, markets_file='markets.json'):
+    """Get market configuration for a specific symbol
+
+    Args:
+        symbol: Trading symbol (e.g., 'PIPPINUSDT')
+        markets_file: Path to markets configuration file
+
+    Returns:
+        dict: Market configuration with keys: binance_symbol, input_mint, output_mint, name, description
+
+    Raises:
+        ValueError: If symbol not found in markets configuration
+    """
+    markets = load_markets(markets_file)
+    if symbol not in markets:
+        available = ', '.join(markets.keys())
+        raise ValueError(f"Symbol '{symbol}' not found in markets.json. Available: {available}")
+    return markets[symbol]
 
 
 class TradingBotConfig:

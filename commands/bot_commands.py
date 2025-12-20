@@ -9,7 +9,7 @@ from binance.exceptions import BinanceAPIException
 from managers.binance_manager import BinanceManager
 from managers.jupiter_manager import JupiterSwapManager
 from bot.trading_bot import TradingBot
-from config import TradingBotConfig
+from config import TradingBotConfig, get_market_config
 from utils.logging_setup import orders_logger, trades_logger
 
 logger = logging.getLogger(__name__)
@@ -61,9 +61,9 @@ async def test_binance_order(symbol: str, usd_amount: float, config: TradingBotC
 
 
 
-async def test_jupiter_swap(config: TradingBotConfig):
+async def test_jupiter_swap(config: TradingBotConfig, symbol: str = 'PIPPINUSDT'):
     """Test Jupiter swap with small amount ($0.10 USDT)"""
-    print(f"\n=== Testing Jupiter Swap ($0.10 USDT) ===")
+    print(f"\n=== Testing Jupiter Swap ($0.10 USDT) for {symbol} ===")
 
     try:
         jupiter = JupiterSwapManager(
@@ -73,12 +73,14 @@ async def test_jupiter_swap(config: TradingBotConfig):
             config.max_slippage
         )
 
-        # Get mints from env
-        input_mint = os.getenv('BUY_INPUT_MINT')
-        output_mint = os.getenv('BUY_OUTPUT_MINT')
-
-        if not input_mint or not output_mint:
-            print("❌ Missing BUY_INPUT_MINT or BUY_OUTPUT_MINT in .env")
+        # Get mints from markets.json
+        try:
+            market = get_market_config(symbol)
+            input_mint = market['input_mint']
+            output_mint = market['output_mint']
+            print(f"Market: {market['name']} - {market['description']}")
+        except (ValueError, KeyError) as e:
+            print(f"❌ Failed to get market configuration for {symbol}: {e}")
             return
 
         print(f"Input mint: {input_mint}")
@@ -165,8 +167,15 @@ async def cmd_balance(symbol: str, config: TradingBotConfig):
 
         # Get Solana wallet balance
         try:
-            input_mint = os.getenv('BUY_INPUT_MINT')
-            output_mint = os.getenv('BUY_OUTPUT_MINT')
+            # Get market configuration
+            try:
+                market = get_market_config(symbol)
+                input_mint = market['input_mint']
+                output_mint = market['output_mint']
+            except (ValueError, KeyError) as e:
+                print(f"⚠️  Could not load market config for {symbol}: {e}")
+                input_mint = "N/A"
+                output_mint = "N/A"
 
             print(f"🔗 Solana Wallet: {str(jupiter.keypair.pubkey())}")
             print(f"   Input Token (USDC): {input_mint}")

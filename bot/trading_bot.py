@@ -4,7 +4,7 @@ Main trading bot orchestrator
 import os
 import asyncio
 import logging
-from config import TradingBotConfig
+from config import TradingBotConfig, get_market_config
 from managers.binance_manager import BinanceManager
 from managers.jupiter_manager import JupiterSwapManager
 from bot.status_display import StatusDisplay
@@ -228,12 +228,15 @@ class TradingBot:
         if self.status_display:
             self.status_display.add_action("🔄 Executing DEX swap on Jupiter...")
 
-        input_mint = os.getenv('BUY_INPUT_MINT')
-        output_mint = os.getenv('BUY_OUTPUT_MINT')
-
-        if not input_mint or not output_mint:
-            logger.error("Missing mint configuration for DEX swap")
-            bot_logger.error(f"JUPITER_SWAP_FAILED | Missing mint configuration")
+        # Get market configuration for mint addresses
+        try:
+            market = get_market_config(self.symbol)
+            input_mint = market['input_mint']
+            output_mint = market['output_mint']
+            logger.info(f"Loaded market config: {market['name']} - {market['description']}")
+        except (ValueError, KeyError) as e:
+            logger.error(f"Failed to get market configuration for {self.symbol}: {e}")
+            bot_logger.error(f"JUPITER_SWAP_FAILED | Market configuration error: {e}")
             return False
 
         # Use actual USD value from Binance fill, not config amount
