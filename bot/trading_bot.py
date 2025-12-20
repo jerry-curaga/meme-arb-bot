@@ -196,7 +196,7 @@ class TradingBot:
             bot_logger.info(f"ORDER_FILLED | Symbol: {self.symbol} | OrderID: {filled_order['orderId']} | Fill_Price: ${fill_price:.8f} | Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f}")
 
             # IMPORTANT: Only set order_filled to True AFTER successful Jupiter swap
-            # This ensures we retry if Jupiter swap fails
+            # execute_dex_buy handles retries internally (3 attempts with exponential backoff)
             success = await self.execute_dex_buy(filled_order)
             if success:
                 self.order_filled = True
@@ -204,23 +204,14 @@ class TradingBot:
                 # Stop the bot
                 self.running = False
             else:
-                logger.error("⚠️  Jupiter swap failed, will retry...")
-                # WebSocket stays open, but we don't get another fill event
-                # So we need to keep retrying manually
-                retry_count = 0
-                while not self.order_filled and retry_count < 10:
-                    await asyncio.sleep(5)
-                    logger.info(f"Retrying Jupiter swap (attempt {retry_count + 2})...")
-                    success = await self.execute_dex_buy(filled_order)
-                    if success:
-                        self.order_filled = True
-                        logger.info("✅ Arbitrage completed successfully!")
-                        self.running = False
-                        break
-                    retry_count += 1
+                logger.error("❌ Jupiter swap FAILED after 3 attempts")
+                logger.error("⚠️  Position is UNHEDGED - manual intervention required!")
+                logger.error(f"   Binance: SOLD {fill_qty} tokens")
+                logger.error(f"   Jupiter: BUY FAILED")
+                bot_logger.error(f"ARBITRAGE_FAILED | Symbol: {self.symbol} | Binance filled but Jupiter failed | UNHEDGED_POSITION")
 
-                if not self.order_filled:
-                    logger.error("❌ Failed to complete arbitrage after 10 retries")
+                # Stop the bot - position needs manual handling
+                self.running = False
 
         except Exception as e:
             logger.error(f"Error handling order fill: {e}")
@@ -331,33 +322,45 @@ class TradingBot:
 
         # Retry logic for executing Jupiter swap (up to 3 attempts with exponential backoff)
         swap_result = None
+        logger.info("🔄 Starting Jupiter swap execution (max 3 attempts)...")
+
         for attempt in range(1, 4):
             try:
-                logger.info(f"Attempting to execute Jupiter swap (attempt {attempt}/3)...")
+                logger.info(f"📍 Attempt {attempt}/3: Submitting transaction to Jupiter...")
                 swap_result = await self.jupiter.execute_swap(order)
+
                 if swap_result and swap_result.get('success'):
-                    logger.info(f"✓ Successfully executed swap on attempt {attempt}")
+                    logger.info(f"✅ SUCCESS on attempt {attempt}/3")
                     break
                 elif swap_result and not swap_result.get('success'):
                     # Jupiter reported failure
                     error = swap_result.get('error', 'Unknown error')
-                    logger.error(f"Jupiter swap FAILED on attempt {attempt}: {error}")
+                    tx_sig = swap_result.get('signature', 'N/A')
+                    logger.error(f"❌ FAILED on attempt {attempt}/3")
+                    logger.error(f"   Jupiter status: Failed")
+                    logger.error(f"   Error: {error}")
+                    logger.error(f"   TX: {tx_sig}")
+
+                    if attempt < 3:
+                        wait_time = 2 ** attempt  # 2s, 4s
+                        logger.warning(f"⏳ Retrying in {wait_time}s... ({3 - attempt} attempts remaining)")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"❌ All 3 attempts exhausted")
+                else:
+                    logger.warning(f"⚠️  Attempt {attempt}/3: No response from Jupiter")
                     if attempt < 3:
                         wait_time = 2 ** attempt
-                        logger.info(f"Waiting {wait_time}s before retry...")
+                        logger.warning(f"⏳ Retrying in {wait_time}s...")
                         await asyncio.sleep(wait_time)
-                else:
-                    logger.warning(f"Jupiter swap returned None on attempt {attempt}")
-                    if attempt < 3:
-                        wait_time = 2 ** attempt  # Exponential backoff: 2s, 4s
-                        logger.info(f"Waiting {wait_time}s before retry...")
-                        await asyncio.sleep(wait_time)
+
             except Exception as e:
-                logger.error(f"Exception executing Jupiter swap (attempt {attempt}): {e}")
+                logger.error(f"❌ Exception on attempt {attempt}/3: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
                 if attempt < 3:
                     wait_time = 2 ** attempt
+                    logger.warning(f"⏳ Retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
 
         if swap_result and swap_result.get('success'):
