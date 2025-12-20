@@ -47,9 +47,6 @@ def get_market_config(symbol: str, markets_file='markets.json'):
 
 class TradingBotConfig:
     def __init__(self):
-        # CEX provider selection
-        self.cex_provider = os.getenv('CEX_PROVIDER', 'binance').lower()
-
         # Binance credentials
         self.binance_api_key = os.getenv('BINANCE_API_KEY')
         self.binance_api_secret = os.getenv('BINANCE_API_SECRET')
@@ -71,18 +68,29 @@ class TradingBotConfig:
         self._validate()
 
     def _validate(self):
-        """Validate required environment variables based on CEX provider"""
+        """Validate required environment variables"""
         # Always required
         required = ['SOLANA_PRIVATE_KEY', 'JUPITER_API_KEY']
-
-        # CEX-specific requirements
-        if self.cex_provider == 'binance':
-            required.extend(['BINANCE_API_KEY', 'BINANCE_API_SECRET'])
-        elif self.cex_provider == 'mexc':
-            required.extend(['MEXC_API_KEY', 'MEXC_API_SECRET'])
-        else:
-            raise ValueError(f"Invalid CEX_PROVIDER: {self.cex_provider}. Must be 'binance' or 'mexc'")
-
         missing = [var for var in required if not os.getenv(var)]
+
+        # Check which CEX providers are used in markets.json
+        try:
+            markets = load_markets()
+            providers_used = set(m.get('cex_provider', 'binance') for m in markets.values())
+
+            # Validate credentials for each provider used
+            for provider in providers_used:
+                if provider == 'binance':
+                    if not (self.binance_api_key and self.binance_api_secret):
+                        missing.extend(['BINANCE_API_KEY', 'BINANCE_API_SECRET'])
+                elif provider == 'mexc':
+                    if not (self.mexc_api_key and self.mexc_api_secret):
+                        missing.extend(['MEXC_API_KEY', 'MEXC_API_SECRET'])
+                else:
+                    raise ValueError(f"Invalid cex_provider in markets.json: {provider}. Must be 'binance' or 'mexc'")
+        except Exception as e:
+            # If markets.json can't be loaded, skip CEX validation
+            pass
+
         if missing:
-            raise ValueError(f"Missing environment variables: {missing}")
+            raise ValueError(f"Missing environment variables: {list(set(missing))}")

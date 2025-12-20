@@ -20,18 +20,23 @@ class TradingBot:
         self.usd_amount = usd_amount  # USD amount to trade
         self.config = config
 
+        # Get market configuration
+        self.market_config = get_market_config(symbol)
+        cex_provider = self.market_config.get('cex_provider', 'binance')
+        self.cex_symbol = self.market_config.get('symbol', symbol)
+
         # Create status display
         self.status_display = StatusDisplay(symbol, usd_amount) if enable_status_display else None
 
-        # Initialize CEX manager based on provider
-        if config.cex_provider == 'binance':
-            logger.info(f"Using Binance as CEX provider")
+        # Initialize CEX manager based on provider from market config
+        if cex_provider == 'binance':
+            logger.info(f"Using Binance as CEX provider for {symbol}")
             self.cex = BinanceManager(config.binance_api_key, config.binance_api_secret, self.status_display)
-        elif config.cex_provider == 'mexc':
-            logger.info(f"Using MEXC as CEX provider")
+        elif cex_provider == 'mexc':
+            logger.info(f"Using MEXC as CEX provider for {symbol}")
             self.cex = MEXCManager(config.mexc_api_key, config.mexc_api_secret, self.status_display)
         else:
-            raise ValueError(f"Unsupported CEX provider: {config.cex_provider}")
+            raise ValueError(f"Unsupported CEX provider: {cex_provider}")
 
         # Initialize Jupiter manager
         self.jupiter = JupiterSwapManager(
@@ -49,7 +54,7 @@ class TradingBot:
         Check if there are existing open orders and validate if they're still appropriate.
         Returns True if we should place a new order, False if existing order is still valid.
         """
-        open_orders = self.cex.get_open_orders(self.symbol)
+        open_orders = self.cex.get_open_orders(self.cex_symbol)
 
         if not open_orders:
             logger.info("No existing orders found")
@@ -57,7 +62,7 @@ class TradingBot:
             return True  # No orders, should place new one
 
         # Get current market price
-        current_price = self.cex.get_current_price(self.symbol)
+        current_price = self.cex.get_current_price(self.cex_symbol)
         if not current_price:
             logger.error("Failed to get current price for order validation")
             return True  # If we can't get price, place new order anyway
@@ -104,7 +109,7 @@ class TradingBot:
             if should_cancel:
                 logger.info(f"Cancelling existing order {order_id}: {cancel_reason}")
                 bot_logger.info(f"STARTUP_CANCEL | Symbol: {self.symbol} | OrderID: {order_id} | Reason: {cancel_reason}")
-                self.cex.cancel_order(self.symbol, order_id)
+                self.cex.cancel_order(self.cex_symbol, order_id)
                 return True  # Should place new order
             else:
                 # Order is still valid, use it
@@ -139,14 +144,14 @@ class TradingBot:
         should_place_new_order = await self.validate_existing_orders()
 
         if should_place_new_order:
-            current_price = self.cex.get_current_price(self.symbol)
+            current_price = self.cex.get_current_price(self.cex_symbol)
             if not current_price:
                 logger.error("Failed to get initial price")
                 bot_logger.error(f"BOT_ERROR | Failed to get initial price for {self.symbol}")
                 return
 
             quote_price = current_price * (1 + self.config.mark_up_percent / 100)
-            self.cex.place_limit_sell_order(self.symbol, self.usd_amount, quote_price, current_price)
+            self.cex.place_limit_sell_order(self.cex_symbol, self.usd_amount, quote_price, current_price)
 
         await asyncio.gather(
             self.monitor_prices(),
@@ -160,19 +165,19 @@ class TradingBot:
         """Monitor price changes and update orders"""
         while self.running and not self.order_filled:
             try:
-                current_price = self.cex.get_current_price(self.symbol)
-                
+                current_price = self.cex.get_current_price(self.cex_symbol)
+
                 if current_price and self.cex.should_update_order(
-                    current_price, 
+                    current_price,
                     self.config.price_change_threshold
                 ):
                     logger.info(f"Market moved {self.config.price_change_threshold}% from {self.cex.market_price_at_order}, updating order")
-                    
+
                     if self.cex.current_order_id:
-                        self.cex.cancel_order(self.symbol, self.cex.current_order_id)
-                    
+                        self.cex.cancel_order(self.cex_symbol, self.cex.current_order_id)
+
                     new_quote_price = current_price * (1 + self.config.mark_up_percent / 100)
-                    self.cex.place_limit_sell_order(self.symbol, self.usd_amount, new_quote_price, current_price)
+                    self.cex.place_limit_sell_order(self.cex_symbol, self.usd_amount, new_quote_price, current_price)
                 
                 await asyncio.sleep(2)
             except Exception as e:

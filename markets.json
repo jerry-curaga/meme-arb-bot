@@ -1,9 +1,10 @@
 {
   "PIPPINUSDT": {
-    "binance_symbol": "PIPPINUSDT",
+    "cex_provider": "binance",
+    "symbol": "PIPPINUSDT",
     "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "output_mint": "Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump",
     "name": "PIPPIN",
-    "description": "PIPPIN memecoin arbitrage"
+    "description": "PIPPIN memecoin arbitrage (Binance)"
   }
 }
