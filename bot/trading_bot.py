@@ -175,12 +175,12 @@ class TradingBot:
                 if not self.binance.current_order_id:
                     await asyncio.sleep(5)
                     continue
-                
+
                 filled_order = self.binance.check_order_filled(
                     self.symbol,
                     self.binance.current_order_id
                 )
-                
+
                 if filled_order:
                     # Log CEX transaction (order fill)
                     fill_price = float(filled_order.get('avgPrice', 0))
@@ -192,16 +192,29 @@ class TradingBot:
                     trades_logger.info(f"CEX_FILL | Symbol: {self.symbol} | Binance_OrderID: {filled_order['orderId']} | Fill_Price: {fill_price:.8f} | Fill_Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f} | Side: SELL")
                     bot_logger.info(f"ORDER_FILLED | Symbol: {self.symbol} | OrderID: {filled_order['orderId']} | Fill_Price: ${fill_price:.8f} | Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f}")
 
-                    self.order_filled = True
-                    await self.execute_dex_buy(filled_order)
-                
+                    # IMPORTANT: Only set order_filled to True AFTER successful Jupiter swap
+                    # This ensures we retry if Jupiter swap fails
+                    success = await self.execute_dex_buy(filled_order)
+                    if success:
+                        self.order_filled = True
+                        logger.info("✅ Arbitrage completed successfully!")
+                    else:
+                        logger.error("⚠️  Jupiter swap failed, will retry...")
+                        await asyncio.sleep(5)  # Wait before retry
+
                 await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"Error in monitor_order_fill: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
                 await asyncio.sleep(5)
     
-    async def execute_dex_buy(self, filled_order: dict):
-        """Execute purchase on Jupiter DEX after being filled on Binance"""
+    async def execute_dex_buy(self, filled_order: dict) -> bool:
+        """Execute purchase on Jupiter DEX after being filled on Binance
+
+        Returns:
+            bool: True if swap succeeded, False if failed (will retry)
+        """
         logger.info("Executing DEX buy to complete arbitrage...")
 
         # Calculate actual USD value from Binance fill
@@ -221,20 +234,40 @@ class TradingBot:
         if not input_mint or not output_mint:
             logger.error("Missing mint configuration for DEX swap")
             bot_logger.error(f"JUPITER_SWAP_FAILED | Missing mint configuration")
-            return
+            return False
 
         # Use actual USD value from Binance fill, not config amount
         amount_in_lamports = int(binance_usd_value * 1e6)  # Convert USD to USDC lamports (6 decimals)
         logger.info(f"Jupiter swap amount: ${binance_usd_value:.2f} USD = {amount_in_lamports} lamports")
         bot_logger.info(f"JUPITER_AMOUNT_CALC | Binance_Fill_USD: ${binance_usd_value:.8f} | Requested_Lamports: {amount_in_lamports} | Requested_USDC: {amount_in_lamports/1e6:.6f}")
 
-        order = await self.jupiter.get_order(input_mint, output_mint, amount_in_lamports)
+        # Retry logic for getting Jupiter order (up to 3 attempts with exponential backoff)
+        order = None
+        for attempt in range(1, 4):
+            try:
+                logger.info(f"Attempting to get Jupiter order (attempt {attempt}/3)...")
+                order = await self.jupiter.get_order(input_mint, output_mint, amount_in_lamports)
+                if order:
+                    logger.info(f"✓ Successfully got Jupiter order on attempt {attempt}")
+                    break
+                else:
+                    logger.warning(f"Jupiter order returned None on attempt {attempt}")
+                    if attempt < 3:
+                        wait_time = 2 ** attempt  # Exponential backoff: 2s, 4s
+                        logger.info(f"Waiting {wait_time}s before retry...")
+                        await asyncio.sleep(wait_time)
+            except Exception as e:
+                logger.error(f"Exception getting Jupiter order (attempt {attempt}): {e}")
+                if attempt < 3:
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+
         if not order:
-            logger.error("Failed to get Jupiter order")
-            bot_logger.error(f"JUPITER_SWAP_FAILED | Failed to get Jupiter order")
+            logger.error("Failed to get Jupiter order after 3 attempts")
+            bot_logger.error(f"JUPITER_SWAP_FAILED | Failed to get Jupiter order after retries")
             if self.status_display:
                 self.status_display.add_action("❌ Failed to get Jupiter order")
-            return
+            return False
 
         # Extract Jupiter trade details for logging
         jupiter_in_amount_lamports = float(order.get('inAmount', 0))
@@ -247,7 +280,29 @@ class TradingBot:
             logger.warning(f"⚠️  Jupiter amount mismatch! Requested: {amount_in_lamports} lamports (${amount_in_lamports/1e6:.6f}), Got: {int(jupiter_in_amount_lamports)} lamports (${jupiter_in_amount:.6f}) - {amount_discrepancy_pct:.1f}% difference")
             bot_logger.warning(f"JUPITER_AMOUNT_MISMATCH | Requested_Lamports: {amount_in_lamports} | Received_Lamports: {int(jupiter_in_amount_lamports)} | Discrepancy_Pct: {amount_discrepancy_pct:.2f}%")
 
-        tx_hash = await self.jupiter.execute_swap(order)
+        # Retry logic for executing Jupiter swap (up to 3 attempts with exponential backoff)
+        tx_hash = None
+        for attempt in range(1, 4):
+            try:
+                logger.info(f"Attempting to execute Jupiter swap (attempt {attempt}/3)...")
+                tx_hash = await self.jupiter.execute_swap(order)
+                if tx_hash:
+                    logger.info(f"✓ Successfully executed swap on attempt {attempt}: {tx_hash}")
+                    break
+                else:
+                    logger.warning(f"Jupiter swap returned None on attempt {attempt}")
+                    if attempt < 3:
+                        wait_time = 2 ** attempt  # Exponential backoff: 2s, 4s
+                        logger.info(f"Waiting {wait_time}s before retry...")
+                        await asyncio.sleep(wait_time)
+            except Exception as e:
+                logger.error(f"Exception executing Jupiter swap (attempt {attempt}): {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                if attempt < 3:
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+
         if tx_hash:
             logger.info(f"DEX swap executed! Tx: {tx_hash}")
 
@@ -261,11 +316,13 @@ class TradingBot:
                 self.status_display.add_action(f"✅ DEX SWAP COMPLETE: ${jupiter_in_amount:.2f} → {jupiter_out_amount} tokens | TX: {tx_hash[:8]}...")
 
             self.running = False
+            return True
         else:
-            logger.error("Failed to execute DEX swap")
-            bot_logger.error(f"JUPITER_SWAP_FAILED | Failed to execute swap transaction")
+            logger.error("Failed to execute DEX swap after 3 attempts")
+            bot_logger.error(f"JUPITER_SWAP_FAILED | Failed to execute swap transaction after retries")
             if self.status_display:
                 self.status_display.add_action("❌ Failed to execute DEX swap")
+            return False
 
     async def display_status_loop(self):
         """Periodically display status updates"""
