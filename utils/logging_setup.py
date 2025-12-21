@@ -26,9 +26,9 @@ def setup_file_loggers():
     trades_logger.setLevel(logging.INFO)
     trades_logger.propagate = False
 
-    # Bot activity logger (main log with all actions)
+    # Activity logger (main log with all actions)
     bot_logger = logging.getLogger('bot_activity')
-    bot_handler = logging.FileHandler('bot_activity.log', mode='a')
+    bot_handler = logging.FileHandler('activity.log', mode='a')
     bot_formatter = logging.Formatter('%(asctime)s | %(message)s')
     bot_handler.setFormatter(bot_formatter)
     bot_logger.addHandler(bot_handler)
