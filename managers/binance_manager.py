@@ -350,7 +350,7 @@ class BinanceManager:
                 self.bsm = BinanceSocketManager(self.async_client)
 
             # Start futures mark price stream
-            self.price_socket = self.bsm.futures_mark_price_socket(symbol)
+            self.price_socket = self.bsm.symbol_mark_price_socket(symbol)
 
             logger.info(f"🔌 Starting Binance WebSocket price stream for {symbol}...")
             bot_logger.info(f"WEBSOCKET_PRICE_START | Starting mark price stream for {symbol}")

@@ -15,9 +15,9 @@ from utils.logging_setup import orders_logger, trades_logger
 logger = logging.getLogger(__name__)
 
 
-async def test_binance_order(symbol: str, usd_amount: float, config: TradingBotConfig):
-    """Test Binance order placement and cancellation"""
-    print(f"\n=== Testing Binance Order ({symbol}, ${usd_amount:.2f} USD) ===")
+async def test_binance_order(symbol: str, usd_amount: float, config: TradingBotConfig, limit_price: float = None):
+    """Place a CEX order"""
+    print(f"\n=== Placing CEX Order ({symbol}, ${usd_amount:.2f} USD) ===")
 
     binance = BinanceManager(config.binance_api_key, config.binance_api_secret)
 
@@ -28,8 +28,13 @@ async def test_binance_order(symbol: str, usd_amount: float, config: TradingBotC
             print("❌ Failed to get price")
             return
 
-        # Place sell order at 2% above market
-        test_price = price * 1.02
+        # Use provided limit price or default to 2% above market
+        if limit_price:
+            test_price = limit_price
+            print(f"Using provided limit price: ${test_price:.8f}")
+        else:
+            test_price = price * 1.02
+            print(f"Using default limit price (2% above market): ${test_price:.8f}")
         order = binance.place_limit_sell_order(symbol, usd_amount, test_price, price)
 
         if not order:
@@ -61,9 +66,9 @@ async def test_binance_order(symbol: str, usd_amount: float, config: TradingBotC
 
 
 
-async def test_jupiter_swap(config: TradingBotConfig, symbol: str = 'PIPPINUSDT'):
-    """Test Jupiter swap with small amount ($0.10 USDT)"""
-    print(f"\n=== Testing Jupiter Swap ($0.10 USDT) for {symbol} ===")
+async def test_jupiter_swap(config: TradingBotConfig, usd_amount: float = 0.10, symbol: str = 'PIPPINUSDT'):
+    """Execute a DEX swap"""
+    print(f"\n=== Executing DEX Swap (${usd_amount:.2f} USDT) for {symbol} ===")
 
     try:
         jupiter = JupiterSwapManager(
@@ -86,9 +91,9 @@ async def test_jupiter_swap(config: TradingBotConfig, symbol: str = 'PIPPINUSDT'
         print(f"Input mint: {input_mint}")
         print(f"Output mint: {output_mint}")
 
-        # 0.10 USDT (6 decimals)
-        amount = int(0.10 * 1e6)
-        print(f"Amount: {amount} lamports")
+        # Convert USD amount to lamports (6 decimals for USDT/USDC)
+        amount = int(usd_amount * 1e6)
+        print(f"Amount: {amount} lamports (${usd_amount:.2f} USD)")
 
         # Get order from Jupiter
         print("\n1. Getting order from Jupiter...")
@@ -367,8 +372,8 @@ Available Commands:
 🤖 TRADING:
   start            - Start arbitrage bot with current settings
   stop             - Stop running arbitrage bot
-  test-binance     - Test Binance orders (safe)
-  test-jupiter     - Test Jupiter swaps (safe)
+  cex-order <amt> [price] - Place CEX order (e.g., cex-order 10 or cex-order 10 0.42)
+  dex-swap <amt>   - Execute DEX swap (e.g., dex-swap 10)
 
 ⚙️  SETTINGS:
   set symbol <SYM> - Change trading symbol (e.g., set symbol PIPPINUSDT)
