@@ -414,9 +414,9 @@ Available Commands:
 
             elif cmd == 'price':
                 try:
-                    if running_bot and running_bot.binance.current_price:
+                    if running_bot and running_bot.cex.current_price:
                         # Use cached price from running bot
-                        price = running_bot.binance.current_price
+                        price = running_bot.cex.current_price
                         print(f"💰 Current {current_symbol} price: ${price:.8f}")
                     else:
                         # Fetch fresh price
