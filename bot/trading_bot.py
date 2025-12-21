@@ -154,15 +154,48 @@ class TradingBot:
             self.cex.place_limit_sell_order(self.cex_symbol, self.usd_amount, quote_price, current_price)
 
         await asyncio.gather(
-            self.monitor_prices(),
+            self.monitor_prices_websocket(),
             self.monitor_order_fill_websocket()
         )
 
         # Log bot stop
         bot_logger.info(f"BOT_STOP | Symbol: {self.symbol}")
-    
-    async def monitor_prices(self):
-        """Monitor price changes and update orders"""
+
+    async def monitor_prices_websocket(self):
+        """Monitor price changes via WebSocket and update orders"""
+        try:
+            # Check if CEX manager supports price stream
+            if hasattr(self.cex, 'start_price_stream'):
+                logger.info("Using WebSocket for price monitoring")
+                await self.cex.start_price_stream(self.cex_symbol, self._handle_price_update)
+            else:
+                # Fallback to polling for CEX providers without WebSocket
+                logger.info("Using REST polling for price monitoring")
+                await self._monitor_prices_polling()
+        except Exception as e:
+            logger.error(f"WebSocket price monitoring failed: {e}")
+            logger.warning("Falling back to REST polling...")
+            await self._monitor_prices_polling()
+
+    async def _handle_price_update(self, current_price: float):
+        """Handle price update from WebSocket"""
+        if not self.running or self.order_filled:
+            return
+
+        try:
+            if self.cex.should_update_order(current_price, self.config.price_change_threshold):
+                logger.info(f"Market moved {self.config.price_change_threshold}% from {self.cex.market_price_at_order}, updating order")
+
+                if self.cex.current_order_id:
+                    self.cex.cancel_order(self.cex_symbol, self.cex.current_order_id)
+
+                new_quote_price = current_price * (1 + self.config.mark_up_percent / 100)
+                self.cex.place_limit_sell_order(self.cex_symbol, self.usd_amount, new_quote_price, current_price)
+        except Exception as e:
+            logger.error(f"Error handling price update: {e}")
+
+    async def _monitor_prices_polling(self):
+        """Fallback: Monitor price changes via REST API polling"""
         while self.running and not self.order_filled:
             try:
                 current_price = self.cex.get_current_price(self.cex_symbol)
@@ -178,7 +211,7 @@ class TradingBot:
 
                     new_quote_price = current_price * (1 + self.config.mark_up_percent / 100)
                     self.cex.place_limit_sell_order(self.cex_symbol, self.usd_amount, new_quote_price, current_price)
-                
+
                 await asyncio.sleep(2)
             except Exception as e:
                 logger.error(f"Error in monitor_prices: {e}")

@@ -1,12 +1,14 @@
 # TODO
 
-P0
-- support MEXC as additional perp source
-- allow bot to monitor and place orders on both perps
-- support multiple markups, to incrase order flow
+P1
+- add order cancel to order log
+- rename bot_activity to just .log or something
+- rename test-binance and test-jupiter, and allow program command to dex-buy <amount> or cex-order <amount> <price>
+
 
 P1
 - improve dex latency
+- support multiple markups to increase order flow
 
  
 P2

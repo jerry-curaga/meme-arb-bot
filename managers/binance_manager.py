@@ -29,6 +29,8 @@ class BinanceManager:
         self.async_client = None
         self.bsm = None
         self.user_socket = None
+        self.price_socket = None
+        self.price_callback = None
 
     def _get_symbol_precision(self, symbol: str) -> dict:
         """Get quantity and price precision for a symbol"""
@@ -269,6 +271,10 @@ class BinanceManager:
                 # Socket is closed when exiting async context manager
                 self.user_socket = None
 
+            if self.price_socket:
+                logger.info("🔌 Stopping WebSocket price stream...")
+                self.price_socket = None
+
             if self.async_client:
                 await self.async_client.close_connection()
                 self.async_client = None
@@ -277,3 +283,45 @@ class BinanceManager:
             bot_logger.info("WEBSOCKET_STOP | User data stream stopped")
         except Exception as e:
             logger.error(f"Error stopping WebSocket: {e}")
+
+    async def start_price_stream(self, symbol: str, on_price_update: Callable):
+        """Start WebSocket mark price stream for real-time price monitoring
+
+        Args:
+            symbol: Trading symbol to monitor
+            on_price_update: Async callback function to handle price updates
+                           Called with (price: float) when price changes
+        """
+        try:
+            # Create async client if not already created
+            if not self.async_client:
+                self.async_client = await AsyncClient.create(self.api_key, self.api_secret)
+                self.bsm = BinanceSocketManager(self.async_client)
+
+            # Start futures mark price stream
+            self.price_socket = self.bsm.futures_mark_price_socket(symbol)
+
+            logger.info(f"🔌 Starting Binance WebSocket price stream for {symbol}...")
+            bot_logger.info(f"WEBSOCKET_PRICE_START | Starting mark price stream for {symbol}")
+
+            async with self.price_socket as stream:
+                while True:
+                    msg = await stream.recv()
+
+                    # Mark price updates every 3 seconds
+                    if 'p' in msg:  # 'p' is the mark price field
+                        mark_price = float(msg['p'])
+                        self.current_price = mark_price
+
+                        # Update status display
+                        if self.status_display:
+                            self.status_display.update_price(mark_price)
+
+                        # Call the callback
+                        await on_price_update(mark_price)
+
+        except Exception as e:
+            logger.error(f"Price WebSocket error: {e}")
+            bot_logger.error(f"WEBSOCKET_PRICE_ERROR | {e}")
+            import traceback
+            logger.error(traceback.format_exc())
