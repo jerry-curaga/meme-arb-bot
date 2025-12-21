@@ -244,6 +244,43 @@ class MEXCManager:
             logger.error(f"Error placing order: {e}")
             return None
 
+    def modify_order(self, symbol: str, order_id: str, usd_amount: float, new_price: float, market_price: float) -> dict:
+        """Modify existing order (MEXC doesn't support modify, so cancel + recreate)
+
+        Args:
+            symbol: Trading symbol
+            order_id: Existing order ID to modify
+            usd_amount: New USD amount for the order
+            new_price: New limit price
+            market_price: Current market price (for logging)
+
+        Returns:
+            New order dict or None on failure
+        """
+        mexc_symbol = self._normalize_symbol(symbol)
+
+        try:
+            # MEXC doesn't have order modification endpoint
+            # Fallback to cancel + create atomically
+            logger.info(f"MEXC doesn't support modify - using cancel+create for order {order_id}")
+
+            # Cancel old order
+            self.cancel_order(symbol, order_id)
+
+            # Create new order
+            new_order = self.place_limit_sell_order(symbol, usd_amount, new_price, market_price)
+
+            if new_order:
+                # Log as modification for consistency
+                from utils.logging_setup import orders_logger
+                orders_logger.info(f"ORDER_MODIFIED | Symbol: {mexc_symbol} | OldOrderID: {order_id} | NewOrderID: {new_order.get('orderId')} | New_Price: {new_price} | USD_Amount: ${usd_amount:.2f} | Market_Price: {market_price}")
+                logger.info(f"Order modified (cancel+create): {order_id} → {new_order.get('orderId')}")
+
+            return new_order
+        except Exception as e:
+            logger.error(f"Error modifying order: {e}")
+            return None
+
     def cancel_order(self, symbol: str, order_id: str) -> bool:
         """Cancel existing order"""
         mexc_symbol = self._normalize_symbol(symbol)

@@ -151,6 +151,57 @@ class BinanceManager:
             logger.error(f"Error placing order: {e}")
             return None
 
+    def modify_order(self, symbol: str, order_id: int, usd_amount: float, new_price: float, market_price: float) -> dict:
+        """Modify existing order price and quantity
+
+        Args:
+            symbol: Trading symbol
+            order_id: Existing order ID to modify
+            usd_amount: New USD amount for the order
+            new_price: New limit price
+            market_price: Current market price (for logging)
+
+        Returns:
+            Modified order dict or None on failure
+        """
+        try:
+            # Calculate new quantity from USD amount
+            new_quantity = usd_amount / new_price
+            formatted_qty = self._format_quantity(symbol, new_quantity)
+            formatted_price = self._format_price(symbol, new_price)
+
+            logger.info(f"Modifying order {order_id}: ${usd_amount:.2f} USD ({formatted_qty} {symbol}) at {formatted_price} (market: {market_price})")
+
+            # Binance futures_modify_order
+            modified_order = self.client.futures_modify_order(
+                symbol=symbol,
+                orderId=order_id,
+                quantity=formatted_qty,
+                price=formatted_price
+            )
+
+            self.last_order_price = formatted_price
+            self.market_price_at_order = market_price
+
+            # Log order modification to separate file
+            from utils.logging_setup import orders_logger
+            orders_logger.info(f"ORDER_MODIFIED | Symbol: {symbol} | OrderID: {order_id} | New_Price: {formatted_price} | New_Quantity: {formatted_qty} | USD_Amount: ${usd_amount:.2f} | Market_Price: {market_price}")
+
+            # Log to bot activity
+            bot_logger.info(f"ORDER_MODIFIED | Symbol: {symbol} | OrderID: {order_id} | USD: ${usd_amount:.2f} | Qty: {formatted_qty} | Price: ${formatted_price:.8f} | Market: ${market_price:.8f}")
+
+            logger.info(f"Order {order_id} modified successfully")
+
+            # Update status display
+            if self.status_display:
+                self.status_display.set_order(order_id, formatted_price, formatted_qty)
+                self.status_display.add_action(f"✏️  ORDER MODIFIED: ID={order_id} | ${formatted_price:.6f} | Qty={formatted_qty:.4f}")
+
+            return modified_order
+        except BinanceAPIException as e:
+            logger.error(f"Error modifying order: {e}")
+            return None
+
     def cancel_order(self, symbol: str, order_id: int) -> bool:
         """Cancel existing order"""
         try:

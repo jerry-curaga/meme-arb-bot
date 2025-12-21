@@ -187,10 +187,9 @@ class TradingBot:
                 logger.info(f"Market moved {self.config.price_change_threshold}% from {self.cex.market_price_at_order}, updating order")
 
                 if self.cex.current_order_id:
-                    self.cex.cancel_order(self.cex_symbol, self.cex.current_order_id)
-
-                new_quote_price = current_price * (1 + self.config.mark_up_percent / 100)
-                self.cex.place_limit_sell_order(self.cex_symbol, self.usd_amount, new_quote_price, current_price)
+                    # Use modify_order instead of cancel+create
+                    new_quote_price = current_price * (1 + self.config.mark_up_percent / 100)
+                    self.cex.modify_order(self.cex_symbol, self.cex.current_order_id, self.usd_amount, new_quote_price, current_price)
         except Exception as e:
             logger.error(f"Error handling price update: {e}")
 
@@ -207,10 +206,9 @@ class TradingBot:
                     logger.info(f"Market moved {self.config.price_change_threshold}% from {self.cex.market_price_at_order}, updating order")
 
                     if self.cex.current_order_id:
-                        self.cex.cancel_order(self.cex_symbol, self.cex.current_order_id)
-
-                    new_quote_price = current_price * (1 + self.config.mark_up_percent / 100)
-                    self.cex.place_limit_sell_order(self.cex_symbol, self.usd_amount, new_quote_price, current_price)
+                        # Use modify_order instead of cancel+create
+                        new_quote_price = current_price * (1 + self.config.mark_up_percent / 100)
+                        self.cex.modify_order(self.cex_symbol, self.cex.current_order_id, self.usd_amount, new_quote_price, current_price)
 
                 await asyncio.sleep(2)
             except Exception as e:
