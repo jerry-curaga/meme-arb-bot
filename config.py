@@ -60,6 +60,12 @@ class TradingBotConfig:
         self.jupiter_api_url = os.getenv('JUPITER_API_URL', 'https://api.jup.ag/ultra/v1')
         self.jupiter_api_key = os.getenv('JUPITER_API_KEY')
 
+        # OKX DEX
+        self.okx_api_key = os.getenv('OKX_API_KEY')
+        self.okx_secret_key = os.getenv('OKX_SECRET_KEY')
+        self.okx_passphrase = os.getenv('OKX_PASSPHRASE')
+        self.bsc_private_key = os.getenv('BSC_PRIVATE_KEY')  # Optional, for BSC swaps
+
         # Trading parameters
         self.mark_up_percent = 3.0  # 3% above market
         self.price_change_threshold = 0.5  # 0.5% for order update

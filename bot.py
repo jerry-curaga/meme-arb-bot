@@ -19,6 +19,7 @@ from bot.trading_bot import TradingBot
 from commands.bot_commands import (
     test_binance_order,
     test_jupiter_swap,
+    cmd_approve_token,
     cmd_stop,
     cmd_balance,
     cmd_orders,
@@ -31,7 +32,7 @@ from commands.bot_commands import (
 async def main():
     parser = argparse.ArgumentParser(description='CEX/DEX Arbitrage Trading Bot')
     parser.add_argument('--mode', default='interactive',
-                       choices=['interactive', 'trade', 'cex-order', 'dex-swap', 'stop', 'balance', 'orders', 'close-all', 'liquidate'],
+                       choices=['interactive', 'trade', 'cex-order', 'dex-swap', 'approve', 'stop', 'balance', 'orders', 'close-all', 'liquidate'],
                        help='Operation mode (default: interactive)')
     parser.add_argument('--symbol', default='PIPPINUSDT',
                        help='Trading symbol (e.g., PIPPINUSDT)')
@@ -39,6 +40,8 @@ async def main():
                        help='USD amount to trade')
     parser.add_argument('--price', type=float,
                        help='Limit price for CEX order')
+    parser.add_argument('--approve-amount', type=float, default=None,
+                       help='Amount to approve (default: unlimited)')
 
     args = parser.parse_args()
 
@@ -57,7 +60,10 @@ async def main():
         await test_binance_order(args.symbol, args.usd_amount, config, args.price)
 
     elif args.mode == 'dex-swap':
-        await test_jupiter_swap(config, args.usd_amount)
+        await test_jupiter_swap(config, args.usd_amount, args.symbol)
+
+    elif args.mode == 'approve':
+        await cmd_approve_token(args.symbol, config, args.approve_amount)
 
     elif args.mode == 'stop':
         await cmd_stop(config)

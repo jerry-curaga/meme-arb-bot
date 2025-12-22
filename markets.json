@@ -2,17 +2,31 @@
   "PIPPINUSDT": {
     "cex_provider": "binance",
     "symbol": "PIPPINUSDT",
+    "dex_provider": "jupiter",
+    "dex_chain": "solana",
     "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "output_mint": "Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump",
     "name": "PIPPIN",
-    "description": "PIPPIN memecoin arbitrage (Binance)"
+    "description": "PIPPIN memecoin arbitrage (Binance + Jupiter Solana)"
   },
   "NOBODYUSDT": {
     "cex_provider": "mexc",
     "symbol": "NOBODY_USDT",
+    "dex_provider": "jupiter",
+    "dex_chain": "solana",
     "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "output_mint": "C29ebrgYjYoJPMGPnPSGY1q3mMGk4iDSqnQeQQA7moon",
     "name": "NOBODY",
-    "description": "NOBODY memecoin arbitrage (Mexc)"
+    "description": "NOBODY memecoin arbitrage (MEXC + Jupiter Solana)"
+  },
+  "BEATUSDT": {
+    "cex_provider": "binance",
+    "symbol": "BEATUSDT",
+    "dex_provider": "okx",
+    "dex_chain": "bsc",
+    "input_token": "0x55d398326f99059fF775485246999027B3197955",
+    "output_token": "0xcf3232B85b43BCa90E51D38cc06Cc8bB8C8A3E36",
+    "name": "BEAT",
+    "description": "BEAT memecoin arbitrage (Binance + OKX BSC)"
   }
 }

@@ -8,6 +8,7 @@ from config import TradingBotConfig, get_market_config
 from managers.binance_manager import BinanceManager
 from managers.mexc_manager import MEXCManager
 from managers.jupiter_manager import JupiterSwapManager
+from managers.okx_dex_manager import OKXDexManager
 from bot.status_display import StatusDisplay
 from utils.logging_setup import bot_logger, trades_logger
 
@@ -38,13 +39,38 @@ class TradingBot:
         else:
             raise ValueError(f"Unsupported CEX provider: {cex_provider}")
 
-        # Initialize Jupiter manager
-        self.jupiter = JupiterSwapManager(
-            config.solana_private_key,
-            config.jupiter_api_url,
-            config.jupiter_api_key,
-            config.max_slippage
-        )
+        # Initialize DEX managers based on market config
+        dex_provider = self.market_config.get('dex_provider', 'jupiter')
+        dex_chain = self.market_config.get('dex_chain', 'solana')
+
+        logger.info(f"Using {dex_provider.upper()} on {dex_chain.upper()} for DEX swaps")
+
+        self.dex_provider = dex_provider
+        self.dex_chain = dex_chain
+
+        # Initialize Jupiter (for Solana markets)
+        if dex_provider == 'jupiter' or dex_chain == 'solana':
+            self.jupiter = JupiterSwapManager(
+                config.solana_private_key,
+                config.jupiter_api_url,
+                config.jupiter_api_key,
+                config.max_slippage
+            )
+        else:
+            self.jupiter = None
+
+        # Initialize OKX DEX (for BSC or multi-chain)
+        if dex_provider == 'okx':
+            self.okx_dex = OKXDexManager(
+                api_key=config.okx_api_key,
+                secret_key=config.okx_secret_key,
+                passphrase=config.okx_passphrase,
+                solana_private_key=config.solana_private_key if dex_chain == 'solana' else None,
+                bsc_private_key=config.bsc_private_key if dex_chain == 'bsc' else None,
+                max_slippage=config.max_slippage
+            )
+        else:
+            self.okx_dex = None
 
         self.running = True
         self.order_filled = False
@@ -294,39 +320,57 @@ class TradingBot:
                 await asyncio.sleep(5)
     
     async def execute_dex_buy(self, filled_order: dict) -> bool:
-        """Execute purchase on Jupiter DEX after being filled on Binance
+        """Execute purchase on DEX after being filled on CEX
+
+        Routes to appropriate DEX provider based on market config.
 
         Returns:
             bool: True if swap succeeded, False if failed (will retry)
         """
         logger.info("Executing DEX buy to complete arbitrage...")
 
-        # Calculate actual USD value from Binance fill
-        binance_fill_price = float(filled_order.get('avgPrice', 0))
-        binance_qty = float(filled_order.get('executedQty', 0))
-        binance_usd_value = binance_fill_price * binance_qty
+        # Calculate actual USD value from CEX fill
+        cex_fill_price = float(filled_order.get('avgPrice', 0))
+        cex_qty = float(filled_order.get('executedQty', 0))
+        cex_usd_value = cex_fill_price * cex_qty
 
-        # Log Jupiter swap attempt
-        bot_logger.info(f"JUPITER_SWAP_ATTEMPT | Symbol: {self.symbol} | USD_Amount: ${binance_usd_value:.2f} (Binance_Fill: {binance_qty} @ ${binance_fill_price:.8f})")
+        # Log DEX swap attempt
+        bot_logger.info(f"DEX_SWAP_ATTEMPT | Provider: {self.dex_provider.upper()} | Chain: {self.dex_chain.upper()} | Symbol: {self.symbol} | USD_Amount: ${cex_usd_value:.2f} (CEX_Fill: {cex_qty} @ ${cex_fill_price:.8f})")
 
         if self.status_display:
-            self.status_display.add_action("🔄 Executing DEX swap on Jupiter...")
+            self.status_display.add_action(f"🔄 Executing DEX swap on {self.dex_provider.upper()}...")
 
-        # Get market configuration for mint addresses
+        # Get market configuration
         try:
             market = get_market_config(self.symbol)
-            input_mint = market['input_mint']
-            output_mint = market['output_mint']
             logger.info(f"Loaded market config: {market['name']} - {market['description']}")
         except (ValueError, KeyError) as e:
             logger.error(f"Failed to get market configuration for {self.symbol}: {e}")
-            bot_logger.error(f"JUPITER_SWAP_FAILED | Market configuration error: {e}")
+            bot_logger.error(f"DEX_SWAP_FAILED | Market configuration error: {e}")
             return False
 
-        # Use actual USD value from Binance fill, not config amount
-        amount_in_lamports = int(binance_usd_value * 1e6)  # Convert USD to USDC lamports (6 decimals)
-        logger.info(f"Jupiter swap amount: ${binance_usd_value:.2f} USD = {amount_in_lamports} lamports")
-        bot_logger.info(f"JUPITER_AMOUNT_CALC | Binance_Fill_USD: ${binance_usd_value:.8f} | Requested_Lamports: {amount_in_lamports} | Requested_USDC: {amount_in_lamports/1e6:.6f}")
+        # Route to appropriate DEX provider
+        if self.dex_provider == 'jupiter':
+            return await self._execute_jupiter_swap(market, cex_usd_value)
+        elif self.dex_provider == 'okx':
+            return await self._execute_okx_swap(market, cex_usd_value)
+        else:
+            logger.error(f"Unsupported DEX provider: {self.dex_provider}")
+            return False
+
+    async def _execute_jupiter_swap(self, market: dict, usd_value: float) -> bool:
+        """Execute swap on Jupiter DEX (Solana)"""
+        input_mint = market.get('input_mint')
+        output_mint = market.get('output_mint')
+
+        if not input_mint or not output_mint:
+            logger.error("Missing input_mint or output_mint for Jupiter swap")
+            return False
+
+        # Use actual USD value from CEX fill
+        amount_in_lamports = int(usd_value * 1e6)  # Convert USD to USDC lamports (6 decimals)
+        logger.info(f"Jupiter swap amount: ${usd_value:.2f} USD = {amount_in_lamports} lamports")
+        bot_logger.info(f"JUPITER_AMOUNT_CALC | CEX_Fill_USD: ${usd_value:.8f} | Requested_Lamports: {amount_in_lamports} | Requested_USDC: {amount_in_lamports/1e6:.6f}")
 
         # Retry logic for getting Jupiter order (up to 3 attempts with exponential backoff)
         order = None
@@ -445,6 +489,94 @@ class TradingBot:
             if self.status_display:
                 self.status_display.add_action("❌ Failed to execute DEX swap")
             return False
+
+    async def _execute_okx_swap(self, market: dict, usd_value: float) -> bool:
+        """Execute swap on OKX DEX (BSC or Solana)"""
+        # Get token addresses based on chain
+        if self.dex_chain == 'bsc':
+            input_token = market.get('input_token')
+            output_token = market.get('output_token')
+            decimals = 18  # BSC USDT has 18 decimals
+        elif self.dex_chain == 'solana':
+            input_token = market.get('input_mint')
+            output_token = market.get('output_mint')
+            decimals = 6  # Solana USDC has 6 decimals
+        else:
+            logger.error(f"Unsupported chain for OKX: {self.dex_chain}")
+            return False
+
+        if not input_token or not output_token:
+            logger.error(f"Missing token addresses for OKX {self.dex_chain} swap")
+            return False
+
+        # Convert USD to token amount (with proper decimals)
+        amount = str(int(usd_value * (10 ** decimals)))
+        logger.info(f"OKX swap amount: ${usd_value:.2f} USD = {amount} base units")
+        bot_logger.info(f"OKX_AMOUNT_CALC | CEX_Fill_USD: ${usd_value:.8f} | Amount: {amount} | Chain: {self.dex_chain}")
+
+        # Retry logic for OKX swap (up to 3 attempts)
+        for attempt in range(1, 4):
+            try:
+                logger.info(f"📍 Attempt {attempt}/3: Executing OKX DEX swap...")
+
+                swap_result = await self.okx_dex.swap(
+                    self.dex_chain,
+                    input_token,
+                    output_token,
+                    amount
+                )
+
+                if swap_result and swap_result.get('success'):
+                    logger.info(f"✅ SUCCESS on attempt {attempt}/3")
+
+                    # Extract transaction details based on chain
+                    if self.dex_chain == 'bsc':
+                        tx_hash = swap_result.get('tx_hash')
+                        logger.info(f"OKX BSC swap executed! Tx: {tx_hash}")
+
+                        trades_logger.info(f"DEX_SWAP | Symbol: {self.symbol} | OKX_BSC_TX: {tx_hash} | Status: Success | Input_Amount_USD: ${usd_value:.6f} | Input_Token: {input_token} | Output_Token: {output_token}")
+                        bot_logger.info(f"OKX_SWAP_SUCCESS | Symbol: {self.symbol} | Chain: BSC | TX: {tx_hash} | Status: Success | Input_USD: ${usd_value:.6f}")
+
+                        if self.status_display:
+                            self.status_display.add_action(f"✅ OKX BSC SWAP COMPLETE: ${usd_value:.2f} | TX: {tx_hash[:8]}...")
+
+                    elif self.dex_chain == 'solana':
+                        signed_tx = swap_result.get('signed_transaction', 'N/A')
+                        logger.info(f"OKX Solana swap executed! Signed TX ready")
+
+                        trades_logger.info(f"DEX_SWAP | Symbol: {self.symbol} | OKX_SOL | Status: Success | Input_Amount_USD: ${usd_value:.6f} | Input_Token: {input_token} | Output_Token: {output_token}")
+                        bot_logger.info(f"OKX_SWAP_SUCCESS | Symbol: {self.symbol} | Chain: Solana | Status: Success | Input_USD: ${usd_value:.6f}")
+
+                        if self.status_display:
+                            self.status_display.add_action(f"✅ OKX SOLANA SWAP COMPLETE: ${usd_value:.2f}")
+
+                    self.running = False
+                    return True
+
+                else:
+                    logger.warning(f"⚠️  Attempt {attempt}/3: OKX swap failed or no response")
+                    if attempt < 3:
+                        wait_time = 2 ** attempt  # 2s, 4s
+                        logger.warning(f"⏳ Retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+
+            except Exception as e:
+                logger.error(f"❌ Exception on attempt {attempt}/3: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                if attempt < 3:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"⏳ Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+
+        # All attempts failed
+        logger.error("Failed to execute OKX swap after 3 attempts")
+        bot_logger.error(f"OKX_SWAP_FAILED | Symbol: {self.symbol} | Chain: {self.dex_chain} | Failed after retries")
+
+        if self.status_display:
+            self.status_display.add_action("❌ Failed to execute OKX swap")
+
+        return False
 
     async def display_status_loop(self):
         """Periodically display status updates"""

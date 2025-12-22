@@ -8,9 +8,11 @@ import logging
 from binance.exceptions import BinanceAPIException
 from managers.binance_manager import BinanceManager
 from managers.jupiter_manager import JupiterSwapManager
+from managers.okx_dex_manager import OKXDexManager
 from bot.trading_bot import TradingBot
 from config import TradingBotConfig, get_market_config
 from utils.logging_setup import orders_logger, trades_logger
+from web3 import Web3
 
 logger = logging.getLogger(__name__)
 
@@ -67,68 +69,327 @@ async def test_binance_order(symbol: str, usd_amount: float, config: TradingBotC
 
 
 async def test_jupiter_swap(config: TradingBotConfig, usd_amount: float = 0.10, symbol: str = 'PIPPINUSDT'):
-    """Execute a DEX swap"""
+    """Execute a DEX swap (routes to Jupiter or OKX based on market config)"""
     print(f"\n=== Executing DEX Swap (${usd_amount:.2f} USDT) for {symbol} ===")
 
     try:
-        jupiter = JupiterSwapManager(
-            config.solana_private_key,
-            config.jupiter_api_url,
-            config.jupiter_api_key,
-            config.max_slippage
-        )
-
-        # Get mints from markets.json
+        # Get market configuration
         try:
             market = get_market_config(symbol)
-            input_mint = market['input_mint']
-            output_mint = market['output_mint']
+            dex_provider = market.get('dex_provider', 'jupiter')
+            dex_chain = market.get('dex_chain', 'solana')
             print(f"Market: {market['name']} - {market['description']}")
+            print(f"DEX Provider: {dex_provider.upper()} on {dex_chain.upper()}")
         except (ValueError, KeyError) as e:
             print(f"❌ Failed to get market configuration for {symbol}: {e}")
             return
 
-        print(f"Input mint: {input_mint}")
-        print(f"Output mint: {output_mint}")
-
-        # Convert USD amount to lamports (6 decimals for USDT/USDC)
-        amount = int(usd_amount * 1e6)
-        print(f"Amount: {amount} lamports (${usd_amount:.2f} USD)")
-
-        # Get order from Jupiter
-        print("\n1. Getting order from Jupiter...")
-        order = await jupiter.get_order(input_mint, output_mint, amount)
-
-        if not order:
-            print("❌ Failed to get order")
-            return
-
-        print(f"✓ Order received!")
-        print(f"Transaction size: {len(order.get('transaction', ''))} chars")
-
-        # Log order details (excluding large transaction field)
-        order_info = {k: v for k, v in order.items() if k != 'transaction'}
-        print(f"Order details: {json.dumps(order_info, indent=2)}")
-
-        # Execute the swap
-        print("\n2. Executing swap...")
-        print("⚠️  This will actually execute the swap and cost SOL fees!")
-        tx_hash = await jupiter.execute_swap(order)
-
-        if not tx_hash:
-            print("❌ Failed to execute swap")
-            return
-
-        print(f"✓ Swap executed successfully!")
-        print(f"Transaction hash: {tx_hash}")
-        print(f"View on Solscan: https://solscan.io/tx/{tx_hash}")
+        # Route to appropriate DEX
+        if dex_provider == 'jupiter':
+            await _execute_jupiter_swap_command(config, market, usd_amount)
+        elif dex_provider == 'okx':
+            await _execute_okx_swap_command(config, market, usd_amount, dex_chain)
+        else:
+            print(f"❌ Unsupported DEX provider: {dex_provider}")
 
     except Exception as e:
-        print(f"❌ Test failed: {e}")
-        logger.error(f"Test failed: {e}")
+        print(f"❌ Swap failed: {e}")
+        logger.error(f"Swap failed: {e}")
         import traceback
-        logger.error(traceback.format_exc())
+        traceback.print_exc()
 
+
+async def _execute_jupiter_swap_command(config: TradingBotConfig, market: dict, usd_amount: float):
+    """Execute Jupiter swap"""
+    jupiter = JupiterSwapManager(
+        config.solana_private_key,
+        config.jupiter_api_url,
+        config.jupiter_api_key,
+        config.max_slippage
+    )
+
+    input_mint = market.get('input_mint')
+    output_mint = market.get('output_mint')
+
+    if not input_mint or not output_mint:
+        print("❌ Missing input_mint or output_mint for Jupiter swap")
+        return
+
+    print(f"Input mint: {input_mint}")
+    print(f"Output mint: {output_mint}")
+
+    # Convert USD amount to lamports (6 decimals for USDT/USDC)
+    amount = int(usd_amount * 1e6)
+    print(f"Amount: {amount} lamports (${usd_amount:.2f} USD)")
+
+    # Get order from Jupiter
+    print("\n1. Getting order from Jupiter...")
+    order = await jupiter.get_order(input_mint, output_mint, amount)
+
+    if not order:
+        print("❌ Failed to get order")
+        return
+
+    print(f"✓ Order received!")
+    print(f"Transaction size: {len(order.get('transaction', ''))} chars")
+
+    # Log order details (excluding large transaction field)
+    order_info = {k: v for k, v in order.items() if k != 'transaction'}
+    print(f"Order details: {json.dumps(order_info, indent=2)}")
+
+    # Execute the swap
+    print("\n2. Executing swap...")
+    print("⚠️  This will actually execute the swap and cost SOL fees!")
+    tx_hash = await jupiter.execute_swap(order)
+
+    if not tx_hash:
+        print("❌ Failed to execute swap")
+        return
+
+    print(f"✓ Swap executed successfully!")
+    print(f"Transaction hash: {tx_hash}")
+    print(f"View on Solscan: https://solscan.io/tx/{tx_hash}")
+
+
+async def _execute_okx_swap_command(config: TradingBotConfig, market: dict, usd_amount: float, dex_chain: str):
+    """Execute OKX DEX swap"""
+    from managers.okx_dex_manager import OKXDexManager
+
+    okx = OKXDexManager(
+        api_key=config.okx_api_key,
+        secret_key=config.okx_secret_key,
+        passphrase=config.okx_passphrase,
+        solana_private_key=config.solana_private_key if dex_chain == 'solana' else None,
+        bsc_private_key=config.bsc_private_key if dex_chain == 'bsc' else None,
+        max_slippage=config.max_slippage
+    )
+
+    # Get token addresses based on chain
+    if dex_chain == 'bsc':
+        input_token = market.get('input_token')
+        output_token = market.get('output_token')
+        decimals = 18  # BSC USDT
+    elif dex_chain == 'solana':
+        input_token = market.get('input_mint')
+        output_token = market.get('output_mint')
+        decimals = 6  # Solana USDC
+    else:
+        print(f"❌ Unsupported chain: {dex_chain}")
+        return
+
+    if not input_token or not output_token:
+        print(f"❌ Missing token addresses for {dex_chain} swap")
+        return
+
+    print(f"Input token: {input_token}")
+    print(f"Output token: {output_token}")
+
+    # Convert USD amount to token base units
+    amount = str(int(usd_amount * (10 ** decimals)))
+    print(f"Amount: {amount} base units (${usd_amount:.2f} USD)")
+
+    # Execute the swap
+    print("\n1. Executing OKX DEX swap...")
+    print(f"⚠️  This will actually execute the swap on {dex_chain.upper()}!")
+
+    swap_result = await okx.swap(dex_chain, input_token, output_token, amount)
+
+    if not swap_result or not swap_result.get('success'):
+        print("❌ Failed to execute swap")
+        return
+
+    # Display results based on chain
+    if dex_chain == 'bsc':
+        tx_hash = swap_result.get('tx_hash')
+        print(f"✓ BSC Swap executed successfully!")
+        print(f"Transaction hash: {tx_hash}")
+        print(f"View on BSCScan: https://bscscan.com/tx/{tx_hash}")
+    elif dex_chain == 'solana':
+        print(f"✓ Solana Swap executed successfully!")
+        print(f"Signed transaction ready")
+
+
+async def cmd_approve_token(symbol: str, config: TradingBotConfig, amount: float = None):
+    """Approve token for DEX trading
+
+    Args:
+        symbol: Trading symbol (e.g., BEATUSDT)
+        config: Bot configuration
+        amount: Amount to approve (None = unlimited)
+    """
+    print(f"\n=== Approving Token for {symbol} ===")
+
+    try:
+        # Get market configuration
+        market = get_market_config(symbol)
+        dex_provider = market.get('dex_provider', 'jupiter')
+        dex_chain = market.get('dex_chain', 'solana')
+
+        print(f"Market: {market['name']}")
+        print(f"DEX Provider: {dex_provider.upper()} on {dex_chain.upper()}")
+
+        # Only EVM chains need approval
+        if dex_chain != 'bsc':
+            print(f"⚠️  Token approval not needed for {dex_chain.upper()}")
+            print(f"   Solana uses different mechanism (no approval required)")
+            return
+
+        # BSC token approval
+        if dex_chain == 'bsc':
+            await _approve_bsc_token(config, market, amount)
+        else:
+            print(f"❌ Unsupported chain: {dex_chain}")
+
+    except Exception as e:
+        print(f"❌ Approval failed: {e}")
+        logger.error(f"Approval failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+async def _approve_bsc_token(config: TradingBotConfig, market: dict, amount: float = None):
+    """Approve BSC token for OKX DEX router"""
+
+    # Get token address
+    token_address = market.get('input_token')
+    if not token_address:
+        print("❌ Missing input_token address")
+        return
+
+    print(f"\nToken to approve: {token_address}")
+
+    # Initialize Web3
+    rpc_url = 'https://bsc-dataseed1.binance.org'
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
+
+    if not config.bsc_private_key:
+        print("❌ BSC_PRIVATE_KEY not configured in .env")
+        return
+
+    account = w3.eth.account.from_key(config.bsc_private_key)
+    print(f"Wallet: {account.address}")
+
+    # OKX DEX router address (from failed transaction)
+    spender = '0x3156020dfF8D99af1dDC523ebDfb1ad2018554a0'
+    print(f"Spender (OKX Router): {spender}")
+
+    # ERC20 ABI (approve function)
+    erc20_abi = [
+        {
+            "constant": False,
+            "inputs": [
+                {"name": "_spender", "type": "address"},
+                {"name": "_value", "type": "uint256"}
+            ],
+            "name": "approve",
+            "outputs": [{"name": "", "type": "bool"}],
+            "type": "function"
+        },
+        {
+            "constant": True,
+            "inputs": [
+                {"name": "_owner", "type": "address"},
+                {"name": "_spender", "type": "address"}
+            ],
+            "name": "allowance",
+            "outputs": [{"name": "", "type": "uint256"}],
+            "type": "function"
+        },
+        {
+            "constant": True,
+            "inputs": [],
+            "name": "decimals",
+            "outputs": [{"name": "", "type": "uint8"}],
+            "type": "function"
+        }
+    ]
+
+    # Create token contract instance
+    token_contract = w3.eth.contract(
+        address=Web3.to_checksum_address(token_address),
+        abi=erc20_abi
+    )
+
+    # Check current allowance
+    try:
+        current_allowance = token_contract.functions.allowance(
+            account.address,
+            Web3.to_checksum_address(spender)
+        ).call()
+        print(f"\nCurrent allowance: {current_allowance / 1e18:.6f} tokens")
+    except Exception as e:
+        print(f"⚠️  Could not check allowance: {e}")
+        current_allowance = 0
+
+    # Determine approval amount
+    if amount is None:
+        # Unlimited approval (max uint256)
+        approve_amount = 2**256 - 1
+        print(f"Approval amount: UNLIMITED (max uint256)")
+    else:
+        # Get token decimals
+        try:
+            decimals = token_contract.functions.decimals().call()
+        except:
+            decimals = 18  # Default to 18
+        approve_amount = int(amount * (10 ** decimals))
+        print(f"Approval amount: {amount} tokens ({approve_amount} base units)")
+
+    # Build approval transaction
+    print("\n📝 Building approval transaction...")
+
+    try:
+        nonce = w3.eth.get_transaction_count(account.address)
+        gas_price = w3.eth.gas_price
+
+        approve_txn = token_contract.functions.approve(
+            Web3.to_checksum_address(spender),
+            approve_amount
+        ).build_transaction({
+            'from': account.address,
+            'gas': 100000,  # Standard approval gas limit
+            'gasPrice': gas_price,
+            'nonce': nonce,
+            'chainId': 56  # BSC mainnet
+        })
+
+        print(f"Gas Price: {gas_price / 1e9:.2f} Gwei")
+        print(f"Estimated Cost: ~{(100000 * gas_price) / 1e18:.6f} BNB")
+
+        # Sign transaction
+        print("\n✍️  Signing transaction...")
+        signed_txn = account.sign_transaction(approve_txn)
+
+        # Send transaction
+        print("📤 Sending transaction...")
+        tx_hash = w3.eth.send_raw_transaction(signed_txn.rawTransaction)
+        tx_hash_hex = tx_hash.hex()
+
+        print(f"✓ Transaction sent: {tx_hash_hex}")
+        print(f"View on BSCScan: https://bscscan.com/tx/{tx_hash_hex}")
+
+        # Wait for confirmation
+        print("\n⏳ Waiting for confirmation...")
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
+
+        if receipt['status'] == 1:
+            print(f"✅ Token approved successfully!")
+            print(f"Gas used: {receipt['gasUsed']:,}")
+
+            # Check new allowance
+            new_allowance = token_contract.functions.allowance(
+                account.address,
+                Web3.to_checksum_address(spender)
+            ).call()
+            print(f"New allowance: {new_allowance / 1e18:.6f} tokens")
+        else:
+            print(f"❌ Transaction failed!")
+            print(f"Receipt: {receipt}")
+
+    except Exception as e:
+        print(f"❌ Error during approval: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 async def cmd_stop(config: TradingBotConfig):

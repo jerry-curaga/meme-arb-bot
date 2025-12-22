@@ -6,3 +6,4 @@ aiohttp==3.9.1
 solders==0.18.1
 base58==2.1.1
 requests==2.31.0
+web3==6.15.1
