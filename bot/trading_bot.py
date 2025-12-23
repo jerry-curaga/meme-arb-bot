@@ -74,6 +74,7 @@ class TradingBot:
 
         self.running = True
         self.order_filled = False
+        self.price_update_counter = 0  # Track price updates for periodic logging
 
     async def validate_existing_orders(self) -> bool:
         """
@@ -209,12 +210,28 @@ class TradingBot:
             return
 
         try:
+            self.price_update_counter += 1
+
+            # Log price update (debug for every update, info every 20 updates)
+            if self.cex.market_price_at_order:
+                price_change = ((current_price - self.cex.market_price_at_order) / self.cex.market_price_at_order) * 100
+
+                # Log at INFO level every 20 updates (~1 minute if 3s intervals)
+                if self.price_update_counter % 20 == 0:
+                    logger.info(f"📊 Price stream active: ${current_price:.8f} ({price_change:+.2f}% from order) | Updates: {self.price_update_counter}")
+                    bot_logger.info(f"PRICE_STREAM_ACTIVE | Symbol: {self.symbol} | Current: ${current_price:.8f} | Change: {price_change:+.2f}% | Updates: {self.price_update_counter}")
+                else:
+                    logger.debug(f"Price update: ${current_price:.8f} ({price_change:+.2f}% from order reference)")
+                    bot_logger.debug(f"PRICE_UPDATE | Symbol: {self.symbol} | Current: ${current_price:.8f} | Change: {price_change:+.2f}%")
+
+            # Check if order needs updating
             if self.cex.should_update_order(current_price, self.config.price_change_threshold):
-                logger.info(f"Market moved {self.config.price_change_threshold}% from {self.cex.market_price_at_order}, updating order")
+                logger.info(f"Market moved {self.config.price_change_threshold}% from ${self.cex.market_price_at_order:.8f}, updating order")
 
                 if self.cex.current_order_id:
                     # Use modify_order instead of cancel+create
                     new_quote_price = current_price * (1 + self.config.mark_up_percent / 100)
+                    logger.info(f"Modifying order: ${self.cex.last_order_price:.8f} → ${new_quote_price:.8f}")
                     self.cex.modify_order(self.cex_symbol, self.cex.current_order_id, self.usd_amount, new_quote_price, current_price)
         except Exception as e:
             logger.error(f"Error handling price update: {e}")
@@ -268,20 +285,35 @@ class TradingBot:
             trades_logger.info(f"CEX_FILL | Symbol: {self.symbol} | Binance_OrderID: {filled_order['orderId']} | Fill_Price: {fill_price:.8f} | Fill_Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f} | Side: SELL")
             bot_logger.info(f"ORDER_FILLED | Symbol: {self.symbol} | OrderID: {filled_order['orderId']} | Fill_Price: ${fill_price:.8f} | Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f}")
 
-            # IMPORTANT: Only set order_filled to True AFTER successful Jupiter swap
+            # IMPORTANT: Only set order_filled to True AFTER successful DEX swap
             # execute_dex_buy handles retries internally (3 attempts with exponential backoff)
             success = await self.execute_dex_buy(filled_order)
             if success:
-                self.order_filled = True
-                logger.info("✅ Arbitrage completed successfully!")
-                # Stop the bot
-                self.running = False
+                logger.info("✅ Arbitrage cycle completed successfully!")
+                bot_logger.info(f"ARBITRAGE_CYCLE_COMPLETE | Symbol: {self.symbol}")
+
+                # Reset state and place new order to continue trading
+                self.order_filled = False
+                self.cex.current_order_id = None
+                self.cex.last_order_price = None
+
+                # Get current price and place new order
+                logger.info("📊 Placing new order to continue trading...")
+                current_price = self.cex.get_current_price(self.cex_symbol)
+                if current_price:
+                    quote_price = current_price * (1 + self.config.mark_up_percent / 100)
+                    self.cex.place_limit_sell_order(self.cex_symbol, self.usd_amount, quote_price, current_price)
+                    logger.info(f"✓ New order placed at ${quote_price:.8f} | Continue trading...")
+                    bot_logger.info(f"NEW_ORDER_PLACED | Symbol: {self.symbol} | Price: ${quote_price:.8f} | Continuing arbitrage")
+                else:
+                    logger.error("Failed to get price for new order - stopping bot")
+                    self.running = False
             else:
-                logger.error("❌ Jupiter swap FAILED after 3 attempts")
+                logger.error("❌ DEX swap FAILED after 3 attempts")
                 logger.error("⚠️  Position is UNHEDGED - manual intervention required!")
-                logger.error(f"   Binance: SOLD {fill_qty} tokens")
-                logger.error(f"   Jupiter: BUY FAILED")
-                bot_logger.error(f"ARBITRAGE_FAILED | Symbol: {self.symbol} | Binance filled but Jupiter failed | UNHEDGED_POSITION")
+                logger.error(f"   CEX: SOLD {fill_qty} tokens")
+                logger.error(f"   DEX: BUY FAILED")
+                bot_logger.error(f"ARBITRAGE_FAILED | Symbol: {self.symbol} | CEX filled but DEX failed | UNHEDGED_POSITION")
 
                 # Stop the bot - position needs manual handling
                 self.running = False
