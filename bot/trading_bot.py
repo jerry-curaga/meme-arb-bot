@@ -158,9 +158,12 @@ class TradingBot:
     async def start(self):
         """Start the trading bot"""
         logger.info(f"Starting bot for {self.symbol}, USD amount: ${self.usd_amount:.2f}")
+        if self.config.no_hedge_mode:
+            logger.warning("⚠️  NO-HEDGE MODE: DEX hedging disabled")
 
         # Log bot start
-        bot_logger.info(f"BOT_START | Symbol: {self.symbol} | USD_Amount: ${self.usd_amount:.2f} | Markup: {self.config.mark_up_percent}% | Threshold: {self.config.price_change_threshold}% | Slippage: {self.config.max_slippage}%")
+        hedge_mode = "NO_HEDGE" if self.config.no_hedge_mode else "FULL_ARBITRAGE"
+        bot_logger.info(f"BOT_START | Symbol: {self.symbol} | USD_Amount: ${self.usd_amount:.2f} | Markup: {self.config.mark_up_percent}% | Threshold: {self.config.price_change_threshold}% | Slippage: {self.config.max_slippage}% | Mode: {hedge_mode}")
 
         # Initialize status display
         if self.status_display:
