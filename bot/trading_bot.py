@@ -209,11 +209,19 @@ class TradingBot:
 
     async def _handle_price_update(self, current_price: float):
         """Handle price update from WebSocket"""
+        # DIAGNOSTIC: Always increment counter, even if bot not running
+        self.price_update_counter += 1
+        if self.price_update_counter % 10 == 0:
+            bot_logger.info(f"WEBSOCKET_CALLBACK | Counter: {self.price_update_counter} | Running: {self.running} | Filled: {self.order_filled}")
+
         if not self.running or self.order_filled:
             return
 
         try:
-            self.price_update_counter += 1
+
+            # Log WebSocket activity every 10 updates regardless of order status (for diagnostics)
+            if self.price_update_counter % 10 == 0:
+                bot_logger.info(f"WEBSOCKET_ACTIVE | Symbol: {self.symbol} | Updates: {self.price_update_counter} | Price: ${current_price:.8f} | Has_Order: {self.cex.market_price_at_order is not None}")
 
             # Log price update (debug for every update, info every 100 updates)
             if self.cex.market_price_at_order:
