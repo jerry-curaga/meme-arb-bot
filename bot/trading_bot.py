@@ -212,12 +212,12 @@ class TradingBot:
         try:
             self.price_update_counter += 1
 
-            # Log price update (debug for every update, info every 300 updates)
+            # Log price update (debug for every update, info every 100 updates)
             if self.cex.market_price_at_order:
                 price_change = ((current_price - self.cex.market_price_at_order) / self.cex.market_price_at_order) * 100
 
-                # Log at INFO level every 300 updates (~15 minutes if 3s intervals)
-                if self.price_update_counter % 300 == 0:
+                # Log at INFO level every 100 updates (~5 minutes if 3s intervals)
+                if self.price_update_counter % 100 == 0:
                     logger.info(f"📊 Price stream active: ${current_price:.8f} ({price_change:+.2f}% from order) | Updates: {self.price_update_counter}")
                     bot_logger.info(f"PRICE_STREAM_ACTIVE | Symbol: {self.symbol} | Current: ${current_price:.8f} | Change: {price_change:+.2f}% | Updates: {self.price_update_counter}")
                 else:
