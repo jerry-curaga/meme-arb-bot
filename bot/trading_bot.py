@@ -285,12 +285,23 @@ class TradingBot:
             trades_logger.info(f"CEX_FILL | Symbol: {self.symbol} | Binance_OrderID: {filled_order['orderId']} | Fill_Price: {fill_price:.8f} | Fill_Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f} | Side: SELL")
             bot_logger.info(f"ORDER_FILLED | Symbol: {self.symbol} | OrderID: {filled_order['orderId']} | Fill_Price: ${fill_price:.8f} | Qty: {fill_qty:.8f} | USD_Value: ${fill_usd_value:.6f}")
 
-            # IMPORTANT: Only set order_filled to True AFTER successful DEX swap
-            # execute_dex_buy handles retries internally (3 attempts with exponential backoff)
-            success = await self.execute_dex_buy(filled_order)
+            # Check if no-hedge mode is enabled
+            if self.config.no_hedge_mode:
+                logger.info("⚠️  NO-HEDGE MODE: Skipping DEX hedge")
+                bot_logger.info(f"NO_HEDGE_MODE | Symbol: {self.symbol} | CEX fill recorded, DEX hedge skipped")
+                success = True  # Consider it successful since we're intentionally not hedging
+            else:
+                # IMPORTANT: Only set order_filled to True AFTER successful DEX swap
+                # execute_dex_buy handles retries internally (3 attempts with exponential backoff)
+                success = await self.execute_dex_buy(filled_order)
+
             if success:
-                logger.info("✅ Arbitrage cycle completed successfully!")
-                bot_logger.info(f"ARBITRAGE_CYCLE_COMPLETE | Symbol: {self.symbol}")
+                if not self.config.no_hedge_mode:
+                    logger.info("✅ Arbitrage cycle completed successfully!")
+                    bot_logger.info(f"ARBITRAGE_CYCLE_COMPLETE | Symbol: {self.symbol}")
+                else:
+                    logger.info("✅ CEX order cycle completed (no-hedge mode)")
+                    bot_logger.info(f"CEX_CYCLE_COMPLETE | Symbol: {self.symbol} | Mode: NO_HEDGE")
 
                 # Reset state and place new order to continue trading
                 self.order_filled = False

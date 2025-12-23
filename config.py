@@ -70,6 +70,7 @@ class TradingBotConfig:
         self.mark_up_percent = 3.0  # 3% above market
         self.price_change_threshold = 0.5  # 0.5% for order update
         self.max_slippage = 1.0  # 1% max slippage on Jupiter
+        self.no_hedge_mode = False  # If True, skip DEX hedging (CEX-only mode)
 
         self._validate()
 

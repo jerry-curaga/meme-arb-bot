@@ -42,10 +42,17 @@ async def main():
                        help='Limit price for CEX order')
     parser.add_argument('--approve-amount', type=float, default=None,
                        help='Amount to approve (default: unlimited)')
+    parser.add_argument('--no-hedge', action='store_true',
+                       help='No-hedge mode: place CEX orders but skip DEX hedging')
 
     args = parser.parse_args()
 
     config = TradingBotConfig()
+
+    # Set no-hedge mode from CLI argument
+    if args.no_hedge:
+        config.no_hedge_mode = True
+        logger.info("⚠️  NO-HEDGE MODE ENABLED: DEX hedging will be skipped")
 
     # Default to interactive mode
     if args.mode == 'interactive':

@@ -565,8 +565,10 @@ async def interactive_mode(config: TradingBotConfig):
     current_markup = config.mark_up_percent
     current_threshold = config.price_change_threshold
     current_slippage = config.max_slippage
+    current_no_hedge = config.no_hedge_mode
     running_bot = None
 
+    hedge_status = "OFF (CEX-only)" if current_no_hedge else "ON (full arbitrage)"
     print(f"""
 ╔══════════════════════════════════════╗
 ║        Meme Arbitrage Bot v2.0       ║
@@ -575,6 +577,7 @@ async def interactive_mode(config: TradingBotConfig):
 
 Current Settings:
   Symbol: {current_symbol} | USD: ${current_amount:.2f} | Markup: {current_markup:.4f}% | Threshold: {current_threshold:.4f}% | Slippage: {current_slippage:.4f}%
+  Hedging: {hedge_status}
 
 Type 'help' for available commands or 'quit' to exit.
 """)
@@ -642,6 +645,7 @@ Available Commands:
   set markup <PCT> - Change perp order markup % above market (e.g., set markup 4.0)
   set threshold <PCT> - Change price change threshold % for order updates (e.g., set threshold 0.3)
   set slippage <PCT> - Change max slippage % for Jupiter swaps (e.g., set slippage 1.5)
+  set nohedge <on/off> - Toggle no-hedge mode (CEX-only, skip DEX hedging)
   show             - Show current settings
 
 🛡️  RISK MANAGEMENT:
@@ -691,6 +695,7 @@ Available Commands:
                     print(f"❌ Error getting price: {e}")
 
             elif cmd == 'show':
+                hedge_status = "OFF (CEX-only)" if current_no_hedge else "ON (full arbitrage)"
                 print(f"""
 Current Settings:
   Symbol: {current_symbol}
@@ -698,6 +703,7 @@ Current Settings:
   Markup: {current_markup:.4f}% (perp order above market price)
   Threshold: {current_threshold:.4f}% (price change to update orders)
   Slippage: {current_slippage:.4f}% (max slippage for Jupiter swaps)
+  Hedging: {hedge_status}
   Bot Status: {'🟢 RUNNING' if running_bot else '🔴 STOPPED'}
 """)
 
@@ -769,8 +775,26 @@ Current Settings:
                     except ValueError:
                         print("❌ Invalid slippage. Use decimal format (e.g., 1.5)")
 
+                elif parts[1] == 'nohedge':
+                    if parts[2] in ['on', 'true', '1', 'yes']:
+                        if running_bot:
+                            print("⚠️  Cannot change hedge mode while bot is running. Use 'stop' first.")
+                        else:
+                            current_no_hedge = True
+                            config.no_hedge_mode = True
+                            print("✅ No-hedge mode ENABLED: Bot will place CEX orders but skip DEX hedging")
+                    elif parts[2] in ['off', 'false', '0', 'no']:
+                        if running_bot:
+                            print("⚠️  Cannot change hedge mode while bot is running. Use 'stop' first.")
+                        else:
+                            current_no_hedge = False
+                            config.no_hedge_mode = False
+                            print("✅ No-hedge mode DISABLED: Bot will execute full arbitrage (CEX + DEX)")
+                    else:
+                        print("❌ Invalid value. Use: on/off, true/false, yes/no, 1/0")
+
                 else:
-                    print("❌ Unknown setting. Use: set symbol|amount|markup|threshold|slippage <value>")
+                    print("❌ Unknown setting. Use: set symbol|amount|markup|threshold|slippage|nohedge <value>")
 
             elif cmd == 'start':
                 if running_bot:
