@@ -172,10 +172,11 @@ class BinanceManager:
 
             logger.info(f"Modifying order {order_id}: ${usd_amount:.2f} USD ({formatted_qty} {symbol}) at {formatted_price} (market: {market_price})")
 
-            # Binance futures_modify_order
+            # Binance futures_modify_order (side is required by API)
             modified_order = self.client.futures_modify_order(
                 symbol=symbol,
                 orderId=order_id,
+                side='SELL',  # Required by Binance Futures API
                 quantity=formatted_qty,
                 price=formatted_price
             )
@@ -359,9 +360,9 @@ class BinanceManager:
                 while True:
                     msg = await stream.recv()
 
-                    # Mark price updates every 3 seconds
-                    if 'p' in msg:  # 'p' is the mark price field
-                        mark_price = float(msg['p'])
+                    # Mark price updates every 1 second - extract from nested 'data' field
+                    if 'data' in msg and 'p' in msg['data']:
+                        mark_price = float(msg['data']['p'])
                         self.current_price = mark_price
 
                         # Update status display
