@@ -1,5 +1,5 @@
 services:
-  arb-bot:
+  meme-arb:
     image: ghcr.io/jerry-curaga/meme-arb:latest
     container_name: meme-arb
     restart: unless-stopped
