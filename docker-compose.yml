@@ -1,13 +1,25 @@
 services:
-  meme-arb:
+  pippin-bot:
     image: ghcr.io/jerry-curaga/meme-arb:latest
-    container_name: meme-arb
+    container_name: pippin-bot
     restart: unless-stopped
     env_file: .env
-    command: python bot.py --mode trade --symbol BEATUSDT --usd-amount 10 --no-hedge
+    command: python bot.py --mode trade --symbol PIPPINUSDT --usd-amount 2000 --markup 2.5 --threshold 0.5 --slippage 0.5
     volumes:
       # Persist logs on host
-      - ./logs:/app/logs
+      - ./logs/pippin:/app/logs
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  beat-bot:
+    image: ghcr.io/jerry-curaga/meme-arb:latest
+    container_name: beat-bot
+    restart: unless-stopped
+    env_file: .env
+    command: python bot.py --mode trade --symbol BEATUSDT --usd-amount 1000 --markup 3.0 --threshold 0.5 --slippage 0.5
+    volumes:
+      # Persist logs on host
+      - ./logs/beat:/app/logs
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 

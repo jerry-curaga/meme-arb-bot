@@ -44,10 +44,20 @@ async def main():
                        help='Amount to approve (default: unlimited)')
     parser.add_argument('--no-hedge', action='store_true',
                        help='No-hedge mode: place CEX orders but skip DEX hedging')
+    parser.add_argument('--markup', type=float, default=None,
+                       help='Markup percentage above market (default: 3.0)')
+    parser.add_argument('--threshold', type=float, default=None,
+                       help='Price change threshold for order updates (default: 0.5)')
+    parser.add_argument('--slippage', type=float, default=None,
+                       help='Max slippage percentage for DEX swaps (default: 1.0)')
 
     args = parser.parse_args()
 
-    config = TradingBotConfig()
+    config = TradingBotConfig(
+        mark_up_percent=args.markup,
+        price_change_threshold=args.threshold,
+        max_slippage=args.slippage
+    )
 
     # Set no-hedge mode from CLI argument
     if args.no_hedge:

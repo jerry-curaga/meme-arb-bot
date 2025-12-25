@@ -46,7 +46,7 @@ def get_market_config(symbol: str, markets_file='markets.json'):
 
 
 class TradingBotConfig:
-    def __init__(self):
+    def __init__(self, mark_up_percent=None, price_change_threshold=None, max_slippage=None):
         # Binance credentials
         self.binance_api_key = os.getenv('BINANCE_API_KEY')
         self.binance_api_secret = os.getenv('BINANCE_API_SECRET')
@@ -66,10 +66,10 @@ class TradingBotConfig:
         self.okx_passphrase = os.getenv('OKX_PASSPHRASE')
         self.bsc_private_key = os.getenv('BSC_PRIVATE_KEY')  # Optional, for BSC swaps
 
-        # Trading parameters
-        self.mark_up_percent = 3.0  # 3% above market
-        self.price_change_threshold = 0.5  # 0.5% for order update
-        self.max_slippage = 1.0  # 1% max slippage on Jupiter
+        # Trading parameters (use provided values or defaults)
+        self.mark_up_percent = mark_up_percent if mark_up_percent is not None else 3.0
+        self.price_change_threshold = price_change_threshold if price_change_threshold is not None else 0.5
+        self.max_slippage = max_slippage if max_slippage is not None else 1.0
         self.no_hedge_mode = False  # If True, skip DEX hedging (CEX-only mode)
 
         self._validate()
