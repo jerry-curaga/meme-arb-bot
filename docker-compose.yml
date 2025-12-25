@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
   arb-bot:
-    image: ghcr.io/jerry-curaga/meme-arb-bot:latest
-    container_name: meme-arb-bot
+    image: ghcr.io/jerry-curaga/meme-arb:latest
+    container_name: meme-arb
     restart: unless-stopped
     env_file: .env
     command: python bot.py --mode trade --symbol BEATUSDT --usd-amount 10 --no-hedge
