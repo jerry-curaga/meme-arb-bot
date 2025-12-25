@@ -830,6 +830,29 @@ Current Settings:
                 else:
                     print("❌ Liquidation cancelled")
 
+            elif cmd == 'cex-order':
+                # Parse amount and optional price
+                if len(parts) < 2:
+                    print("❌ Usage: cex-order <amount> [price]")
+                    continue
+                try:
+                    amount = float(parts[1])
+                    price = float(parts[2]) if len(parts) >= 3 else None
+                    await test_binance_order(current_symbol, amount, config, price)
+                except ValueError:
+                    print("❌ Invalid amount or price. Usage: cex-order <amount> [price]")
+
+            elif cmd == 'dex-swap':
+                # Parse amount
+                if len(parts) < 2:
+                    print("❌ Usage: dex-swap <amount>")
+                    continue
+                try:
+                    amount = float(parts[1])
+                    await test_jupiter_swap(config, amount, current_symbol)
+                except ValueError:
+                    print("❌ Invalid amount. Usage: dex-swap <amount>")
+
             elif cmd == 'test-binance':
                 await test_binance_order(current_symbol, current_amount, config)
 
