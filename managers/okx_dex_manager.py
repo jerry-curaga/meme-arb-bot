@@ -331,9 +331,18 @@ class OKXDexManager:
 
             logger.info("Signing and executing Solana transaction...")
 
-            # Deserialize transaction
-            tx_bytes = base64.b64decode(tx_base64)
-            tx = VersionedTransaction.from_bytes(tx_bytes)
+            # Deserialize transaction (try base58 first, then base64)
+            try:
+                # Try base58 format (OKX returns base58)
+                tx_bytes = base58.b58decode(tx_base64)
+                tx = VersionedTransaction.from_bytes(tx_bytes)
+                logger.info("✓ Decoded transaction from base58 format")
+            except Exception as e:
+                logger.debug(f"Base58 decode failed: {e}, trying base64...")
+                # Fallback to base64
+                tx_bytes = base64.b64decode(tx_base64)
+                tx = VersionedTransaction.from_bytes(tx_bytes)
+                logger.info("✓ Decoded transaction from base64 format")
 
             # Sign transaction
             message = tx.message
