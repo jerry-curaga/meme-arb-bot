@@ -354,16 +354,49 @@ class OKXDexManager:
             signed_tx_bytes = bytes(tx_signed)
             signed_tx_base64 = base64.b64encode(signed_tx_bytes).decode()
 
-            # Submit to Solana RPC (you can use your own RPC endpoint)
-            # For now, we'll return the signed transaction
-            # In production, you'd submit this to a Solana RPC endpoint
+            # Submit transaction to Solana RPC
+            logger.info("📡 Broadcasting transaction to Solana...")
 
-            logger.info(f"✓ Solana swap transaction ready")
-            return {
-                'success': True,
-                'signed_transaction': signed_tx_base64,
-                'message': 'Transaction signed and ready to broadcast'
-            }
+            rpc_url = "https://api.mainnet-beta.solana.com"
+            async with aiohttp.ClientSession() as session:
+                rpc_payload = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "sendTransaction",
+                    "params": [
+                        signed_tx_base64,
+                        {
+                            "encoding": "base64",
+                            "skipPreflight": False,
+                            "preflightCommitment": "confirmed",
+                            "maxRetries": 3
+                        }
+                    ]
+                }
+
+                async with session.post(rpc_url, json=rpc_payload) as resp:
+                    result = await resp.json()
+
+                    if 'result' in result:
+                        tx_signature = result['result']
+                        logger.info(f"✅ Transaction broadcast successful!")
+                        logger.info(f"   Signature: {tx_signature}")
+                        logger.info(f"   Solscan: https://solscan.io/tx/{tx_signature}")
+
+                        return {
+                            'success': True,
+                            'signature': tx_signature,
+                            'signed_transaction': signed_tx_base64,
+                            'solscan_url': f"https://solscan.io/tx/{tx_signature}"
+                        }
+                    else:
+                        error = result.get('error', {})
+                        logger.error(f"❌ Transaction broadcast failed: {error}")
+                        return {
+                            'success': False,
+                            'error': error,
+                            'signed_transaction': signed_tx_base64
+                        }
 
         except Exception as e:
             logger.error(f"Error executing Solana swap: {e}")

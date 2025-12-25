@@ -205,8 +205,11 @@ async def _execute_okx_swap_command(config: TradingBotConfig, market: dict, usd_
         print(f"Transaction hash: {tx_hash}")
         print(f"View on BSCScan: https://bscscan.com/tx/{tx_hash}")
     elif dex_chain == 'solana':
+        signature = swap_result.get('signature')
+        solscan_url = swap_result.get('solscan_url')
         print(f"✓ Solana Swap executed successfully!")
-        print(f"Signed transaction ready")
+        print(f"Transaction signature: {signature}")
+        print(f"View on Solscan: {solscan_url}")
 
 
 async def cmd_approve_token(symbol: str, config: TradingBotConfig, amount: float = None):
