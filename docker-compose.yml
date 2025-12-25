@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  arb-bot:
+    image: ghcr.io/jerry-curaga/meme-arb-bot:latest
+    container_name: meme-arb-bot
+    restart: unless-stopped
+    env_file: .env
+    command: python bot.py --mode trade --symbol BEATUSDT --usd-amount 10 --no-hedge
+    volumes:
+      # Persist logs on host
+      - ./logs:/app
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=300  # Check for updates every 5 minutes
+      - WATCHTOWER_CLEANUP=true       # Remove old images
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+      - WATCHTOWER_LABEL_ENABLE=true  # Only update containers with label
+    command: --interval 300
