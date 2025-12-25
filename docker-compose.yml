@@ -7,7 +7,7 @@ services:
     command: python bot.py --mode trade --symbol BEATUSDT --usd-amount 10 --no-hedge
     volumes:
       # Persist logs on host
-      - ./logs:/app
+      - ./logs:/app/logs
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
