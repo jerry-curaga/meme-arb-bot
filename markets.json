@@ -2,12 +2,12 @@
   "PIPPINUSDT": {
     "cex_provider": "binance",
     "symbol": "PIPPINUSDT",
-    "dex_provider": "okx",
+    "dex_provider": "jupiter",
     "dex_chain": "solana",
     "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     "output_mint": "Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump",
     "name": "PIPPIN",
-    "description": "PIPPIN memecoin arbitrage (Binance + OKX Solana)"
+    "description": "PIPPIN memecoin arbitrage (Binance + Jupiter Solana)"
   },
   "NOBODYUSDT": {
     "cex_provider": "mexc",
